@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plate Test</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+  header { padding: 10px 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button, label.btn, select { background: #2d6cdf; color: #fff; border: 0; border-radius: 6px; padding: 10px 14px; font-size: 15px; }
+  select { background: #222; border: 1px solid #444; max-width: 100%; }
+  button:disabled { opacity: .4; }
+  #note { padding: 0 16px; font-size: 13px; color: #aaa; }
+  #stage { position: relative; width: 100%; }
+  #stage video, #stage img { width: 100%; display: block; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #stats { padding: 6px 16px; font-size: 13px; color: #aaa; }
+  #plates { padding: 0 16px 16px; }
+  .plate { font-size: 20px; font-family: monospace; margin: 6px 0; }
+  .plate .bn { font-family: system-ui, sans-serif; }
+  .plate small { font-size: 13px; color: #aaa; }
+  .ok { color: #3f3; } .bad { color: #f93; }
+  table { border-collapse: collapse; margin: 0 16px 16px; font-size: 14px; }
+  td, th { border-bottom: 1px solid #333; padding: 6px 8px; text-align: left; vertical-align: top; }
+  .wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<header>
+  <select id="pipeline">
+    {% for p in pipelines %}<option value="{{ p.name }}" data-note="{{ p.note }}">{{ p.name }}</option>{% endfor %}
+  </select>
+  <button id="live">Start live</button>
+  <label class="btn">Photo<input id="photo" type="file" accept="image/*" capture="environment" hidden></label>
+  <button id="compare" disabled>Compare all</button>
+</header>
+<div id="note"></div>
+<div id="stage">
+  <video id="video" playsinline muted hidden></video>
+  <canvas id="overlay"></canvas>
+</div>
+<div id="stats"></div>
+<div id="plates"></div>
+<div class="wrap"><table id="table" hidden></table></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const video = $('video'), overlay = $('overlay'), select = $('pipeline');
+const still = document.createElement('img');
+still.hidden = true;
+video.after(still);
+const grab = document.createElement('canvas');
+let running = false, lastBlob = null;
+
+try { const saved = localStorage.getItem('pipeline'); if (saved) select.value = saved; } catch {}
+const showNote = () => $('note').textContent = select.selectedOptions[0].dataset.note;
+select.onchange = () => { try { localStorage.setItem('pipeline', select.value); } catch {} showNote(); };
+showNote();
+
+async function post(url, blob) {
+  const form = new FormData();
+  form.append('image', blob, 'frame.jpg');
+  const t0 = performance.now();
+  const res = await fetch(url, { method: 'POST', body: form });
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  data.roundtrip = Math.round(performance.now() - t0);
+  return data;
+}
+
+const plateText = (p) =>
+  `<span class="${p.valid ? 'ok' : 'bad'}">${p.text || '?'}</span>` + (p.bangla ? ` <span class="bn">${p.bangla}</span>` : '');
+
+function show(data, el) {
+  const r = el.getBoundingClientRect();
+  overlay.width = r.width; overlay.height = r.height;
+  const sx = r.width / data.width, sy = r.height / data.height;
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  ctx.lineWidth = 3; ctx.font = 'bold 16px monospace';
+  for (const p of data.plates) {
+    const [x1, y1, x2, y2] = p.box;
+    ctx.strokeStyle = ctx.fillStyle = p.valid ? '#3f3' : '#f93';
+    ctx.strokeRect(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy);
+    ctx.fillText(p.text || '?', x1 * sx, Math.max(16, y1 * sy - 6));
+  }
+  $('stats').textContent = `${data.pipeline} · ${data.width}x${data.height} · detect ${data.ms.detect} ms · read ${data.ms.read} ms · round trip ${data.roundtrip} ms`;
+  $('plates').innerHTML = data.plates.map(p =>
+    `<div class="plate">${plateText(p)} <small>det ${p.det_conf} · read ${p.conf ?? '-'}</small></div>`).join('');
+}
+
+function showTable(data) {
+  const rows = data.results.map(r => `<tr><td>${r.pipeline}</td>
+    <td>${r.plates.map(plateText).join('<br>') || '-'}</td>
+    <td>${r.ms.detect}</td><td>${r.ms.read}</td></tr>`).join('');
+  $('table').innerHTML = `<tr><th>pipeline</th><th>reading</th><th>detect ms</th><th>read ms</th></tr>${rows}`;
+  $('table').hidden = false;
+}
+
+async function frameBlob() {
+  const scale = Math.min(1, 1280 / video.videoWidth);
+  grab.width = video.videoWidth * scale; grab.height = video.videoHeight * scale;
+  grab.getContext('2d').drawImage(video, 0, 0, grab.width, grab.height);
+  return new Promise(r => grab.toBlob(r, 'image/jpeg', 0.85));
+}
+
+async function loop() {
+  while (running) {
+    lastBlob = await frameBlob();
+    $('compare').disabled = false;
+    try { show(await post(`/predict?pipeline=${select.value}`, lastBlob), video); }
+    catch (e) { $('stats').textContent = e; }
+  }
+}
+
+$('live').onclick = async (e) => {
+  if (running) {
+    running = false;
+    video.srcObject.getTracks().forEach(t => t.stop());
+    e.target.textContent = 'Start live';
+    return;
+  }
+  video.srcObject = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+  await video.play();
+  still.hidden = true; video.hidden = false;
+  running = true; e.target.textContent = 'Stop';
+  loop();
+};
+
+$('photo').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  lastBlob = file;
+  $('compare').disabled = false;
+  still.src = URL.createObjectURL(file);
+  await still.decode();
+  video.hidden = true; still.hidden = false;
+  show(await post(`/predict?pipeline=${select.value}`, file), still);
+};
+
+$('compare').onclick = async (e) => {
+  if (!lastBlob) return;
+  e.target.disabled = true; e.target.textContent = 'Comparing…';
+  try { showTable(await post('/compare', lastBlob)); }
+  catch (err) { $('stats').textContent = err; }
+  e.target.disabled = false; e.target.textContent = 'Compare all';
+};
+</script>
+</body>
+</html>

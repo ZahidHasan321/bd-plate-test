@@ -1,0 +1,16 @@
+{
+  "id": "zahidhasan530/bd-plate-avro-s-night-finetune",
+  "title": "BD plate avro-s night finetune",
+  "code_file": "train_kaggle.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "thasan3003/nightlpbd-nighttime-license-plates-of-bangladesh",
+    "arstrxshad/banglabengali-license-plate-with-number-detection"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

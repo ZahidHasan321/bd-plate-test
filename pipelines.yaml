@@ -1,0 +1,57 @@
+# Each pipeline = plate detector + plate reader. Add a model: export it to weights/onnx/, add an entry.
+#   detector.type: yolo (our ONNX, 1 class) | oim (open-image-models hub model)
+#   reader.type:   yolo (ONNX character detector, Bangla tokens) | fpo (fast-plate-ocr hub model, Latin only)
+# Optional: conf (default detector 0.25, reader 0.25).
+#   vehicles: {path, conf, classes} -> run the plate detector inside each vehicle crop (cascade).
+
+pipelines:
+  avro-s:
+    note: "YOLOv8n detector + YOLOv8s reader. Likely best for cheap boards."
+    detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
+    reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
+
+  avro-n:
+    note: "YOLOv8n + YOLOv8n. Cheapest; safe on any NPU."
+    detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
+    reader: {type: yolo, path: weights/onnx/avro_read_n.onnx}
+
+  oim-avro-s:
+    note: "open-image-models YOLOv9-t 384 detector (MIT) + Avro YOLOv8s reader."
+    detector: {type: oim, model: yolo-v9-t-384-license-plate-end2end}
+    reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
+
+  rashed:
+    note: "Avro YOLOv8n detector + YOLO11n reader."
+    detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
+    reader: {type: yolo, path: weights/onnx/rashed_read.onnx}
+
+  blpd-lite:
+    note: "Avro YOLOv8n detector + BLPD YOLOv12n reader (attention: RK3588 support unverified)."
+    detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
+    reader: {type: yolo, path: weights/onnx/blpd_read.onnx}
+
+  blpd:
+    note: "BLPD as published: YOLOv12m + YOLOv12n. Heavy detector."
+    detector: {type: yolo, path: weights/onnx/blpd_detect.onnx}
+    reader: {type: yolo, path: weights/onnx/blpd_read.onnx}
+
+  maidul:
+    note: "YOLOv8m + YOLOv8m. Heavy accuracy reference."
+    detector: {type: yolo, path: weights/onnx/maidul_detect.onnx}
+    reader: {type: yolo, path: weights/onnx/maidul_read.onnx}
+
+  dhaka-cctv:
+    note: "Dhaka CCTV cascade: COCO YOLO26s vehicles -> YOLO26s plate detector fine-tuned on Dhaka CCTV vehicle crops -> Avro YOLOv8s reader."
+    vehicles: {path: weights/onnx/coco_vehicles.onnx, conf: 0.2, classes: [2, 3, 5, 7]}  # car, motorcycle, bus, truck
+    detector: {type: yolo, path: weights/onnx/dhaka_detect.onnx, conf: 0.35}
+    reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
+
+  dhaka-direct:
+    note: "Dhaka CCTV plate detector on the whole frame (no vehicle stage) -> Avro YOLOv8s reader. For close-ups."
+    detector: {type: yolo, path: weights/onnx/dhaka_detect.onnx, conf: 0.35}
+    reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
+
+  global:
+    note: "Baseline: fast-alpr global models. Latin plates only, Bangla will read as junk."
+    detector: {type: oim, model: yolo-v9-t-384-license-plate-end2end}
+    reader: {type: fpo, model: cct-s-v2-global-model}
