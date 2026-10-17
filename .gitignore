@@ -7,3 +7,5 @@ weights/
 __pycache__/
 bin/
 .impeccable/
+events/
+events.jsonl

@@ -23,7 +23,8 @@ Phone-camera test bench for Bangladeshi licence-plate recognition. Python, FastA
 - `engine.py` — YOLO ONNX runner, BD plate grammar (`assemble`), pipelines from `pipelines.yaml`.
 - `app.py` + `templates/index.html` — web app; `/predict?pipeline=`, `/compare`.
 - `bench.py` — batch evaluation (`--truth gt.csv` for accuracy).
+- `stream.py` — RTSP/video/webcam → tracking + voting → one JSON event per vehicle (`events.jsonl`, `--post URL`).
 - `export.py` — `.pt` → ONNX (needs `uv run --group export`).
 - `train/` — Kaggle fine-tuning job.
 
-Do not commit `weights/`, `captures/`, `results.csv`, `cert.pem`, `key.pem`.
+Do not commit `weights/`, `captures/`, `results.csv`, `events/`, `events.jsonl`, `cert.pem`, `key.pem`.

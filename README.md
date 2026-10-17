@@ -38,6 +38,7 @@ Defined in `pipelines.yaml` (plate detector → character reader). Best so far f
 | Pipeline | Detector → reader | Notes |
 |---|---|---|
 | `avro-s` | YOLOv8n → YOLOv8s | 62% plates fully correct on NightLPBD test; runs on Jetson & RK3588 |
+| `avro-s-fast` | YOLOv8n → YOLOv8s @320px | reader 2.3× faster, but 44% until retrained at 320 |
 | `avro-n` | YOLOv8n → YOLOv8n | cheapest |
 | `oim-avro-s` | YOLOv9-t (MIT) → YOLOv8s | |
 | `rashed` | YOLOv8n → YOLO11n | |
@@ -45,6 +46,17 @@ Defined in `pipelines.yaml` (plate detector → character reader). Best so far f
 | `maidul` | YOLOv8m → YOLOv8m | heavy accuracy reference |
 | `dhaka-cctv` / `dhaka-direct` | (vehicles →) YOLO26s Dhaka-CCTV plate detector → YOLOv8s | trained on daytime high-mounted CCTV |
 | `global` | fast-alpr global models | Latin plates only — baseline |
+
+## Real cameras / video: one result per vehicle
+
+```
+uv run python stream.py rtsp://user:pass@CAMERA_IP/stream --camera gate-1   # IP camera
+uv run python stream.py video.mp4                                            # video file
+uv run python stream.py 0                                                    # webcam
+```
+Processes ~5 frames/s (`--fps`), follows each plate across frames, votes over the readings, and when the
+vehicle leaves prints one JSON event (plate, Bangla, votes, time), appends it to `events.jsonl`, saves the best
+crop in `events/`, and with `--post http://server/api` sends it to a central server.
 
 ## Benchmark on a folder of images
 

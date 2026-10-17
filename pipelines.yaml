@@ -10,6 +10,11 @@ pipelines:
     detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
     reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
 
+  avro-s-fast:
+    note: "avro-s with the reader at 320px instead of 640 (~4x cheaper reader). Not retrained at 320 yet."
+    detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
+    reader: {type: yolo, path: weights/onnx/avro_read_s_320.onnx}
+
   avro-n:
     note: "YOLOv8n + YOLOv8n. Cheapest; safe on any NPU."
     detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
