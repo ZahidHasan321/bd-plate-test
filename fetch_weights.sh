@@ -20,6 +20,12 @@ get MaidulHasan/Project_BLPR model_lp_bb_detection/lp_bb_trained_weights/train/w
 get MaidulHasan/Project_BLPR model_blp_text_extraction/blp_text_trained_weights/train/weights/best.pt weights/raw/maidul/read.pt
 get rashedulalbab253/bangla-number-plate-detection-yolov11 license_plate_detection/yolov11_training/weights/best.pt weights/raw/rashed/read.pt
 get zarifbinhasnat/a-better-model-for-dhaka-city work/claude/models/plate_B_yolo26s_run1.pt weights/raw/dhaka/detect.pt
+# Our fine-tuned avro-s (NightLPBD + LPDB-A), published as a release of this repo.
+REL=https://github.com/ZahidHasan321/bd-plate-test/releases/download/night-v1
+for f in detect read read_320; do
+  [ -f weights/raw/night/$f.pt ] || { mkdir -p weights/raw/night; echo "downloading night/$f.pt";
+    curl -fsSL -o weights/raw/night/$f.pt "$REL/night_$f.pt"; }
+done
 [ -f weights/raw/coco/vehicles.pt ] || { mkdir -p weights/raw/coco; curl -fsSL -o weights/raw/coco/vehicles.pt \
   https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.pt; }
 

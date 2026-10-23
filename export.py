@@ -14,12 +14,14 @@ RAW = ROOT / "weights" / "raw"
 OUT = ROOT / "weights" / "onnx"
 OUT.mkdir(parents=True, exist_ok=True)
 
-# Extra lower-resolution exports of readers (plate crops are small; 320 is ~4x cheaper than 640).
-EXTRA = {"avro/read_s": [320]}
+# Input sizes per model (default 640). Extra sizes get a _<size> suffix; plate crops are small, so a
+# 320 reader is ~4x cheaper. night/read_320 was trained at 320.
+SIZES = {"avro/read_s": [640, 320], "night/read_320": [320]}
 
 for pt in sorted(RAW.glob("*/*.pt")):
-    for size in [640, *EXTRA.get(f"{pt.parent.name}/{pt.stem}", [])]:
-        suffix = "" if size == 640 else f"_{size}"
+    sizes = SIZES.get(f"{pt.parent.name}/{pt.stem}", [640])
+    for size in sizes:
+        suffix = "" if size == sizes[0] else f"_{size}"
         target = OUT / f"{pt.parent.name}_{pt.stem}{suffix}.onnx"
         if target.exists():
             print(f"skip {target.name}")

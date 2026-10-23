@@ -33,12 +33,14 @@ Green box = reading matches the BD plate format (district + letter + 6 digits); 
 
 ## Pipelines
 
-Defined in `pipelines.yaml` (plate detector → character reader). Best so far for cheap edge devices: **`avro-s`**.
+Defined in `pipelines.yaml` (plate detector → character reader). Best so far for cheap edge devices: **`avro-s-night`** (or `avro-s-night-fast` for ~2× faster reading).
 
 | Pipeline | Detector → reader | Notes |
 |---|---|---|
-| `avro-s` | YOLOv8n → YOLOv8s | 62% plates fully correct on NightLPBD test; runs on Jetson & RK3588 |
-| `avro-s-fast` | YOLOv8n → YOLOv8s @320px | reader 2.3× faster, but 44% until retrained at 320 |
+| **`avro-s-night`** | YOLOv8n → YOLOv8s, fine-tuned | **74%** plates fully correct on NightLPBD test (was 62%) |
+| **`avro-s-night-fast`** | same, reader trained at 320px | **70%**, reader ~2× faster |
+| `avro-s` | YOLOv8n → YOLOv8s (original Avro) | 62%; runs on Jetson & RK3588 |
+| `avro-s-fast` | original reader run at 320px | 44% — use `avro-s-night-fast` instead |
 | `avro-n` | YOLOv8n → YOLOv8n | cheapest |
 | `oim-avro-s` | YOLOv9-t (MIT) → YOLOv8s | |
 | `rashed` | YOLOv8n → YOLO11n | |
