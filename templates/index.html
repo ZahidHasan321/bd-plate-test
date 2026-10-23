@@ -12,6 +12,7 @@
   button:disabled { opacity: .4; }
   button.small { padding: 6px 10px; font-size: 13px; background: #333; }
   #note { padding: 0 16px; font-size: 13px; color: #aaa; }
+  #credit { padding: 2px 16px 0; font-size: 11px; color: #777; }
   main { display: grid; gap: 0 16px; }
   @media (min-width: 900px) { main { grid-template-columns: 1fr 400px; } }
   #stage { position: relative; width: 100%; }
@@ -40,8 +41,15 @@
 </head>
 <body>
 <header>
-  <select id="pipeline">
-    {% for p in pipelines %}<option value="{{ p.name }}" data-note="{{ p.note }}">{{ p.name }}</option>{% endfor %}
+  <select id="pipeline" aria-label="Model">
+    {% for label, items in groups if items %}<optgroup label="{{ label }}">
+      {% for p in items %}<option value="{{ p.name }}" data-note="{{ p.note }}">{{ '★ ' if p.tag == 'recommended' }}{{ p.name }}</option>{% endfor %}
+    </optgroup>{% endfor %}
+  </select>
+  <select id="sample" aria-label="Sample">
+    <option value="">Try a sample…</option>
+    <optgroup label="Videos">{% for f in samples.videos %}<option value="videos/{{ f }}">▶ {{ f.rsplit('.', 1)[0].replace('_', ' ') }}</option>{% endfor %}</optgroup>
+    <optgroup label="Photos">{% for f in samples.photos %}<option value="photos/{{ f }}">{{ f.rsplit('.', 1)[0].replace('_', ' ') }}</option>{% endfor %}</optgroup>
   </select>
   <button id="live">Camera</button>
   <label class="btn">Video<input id="file" type="file" accept="video/*" hidden></label>
@@ -49,6 +57,7 @@
   <button id="compare" disabled>Compare all</button>
 </header>
 <div id="note"></div>
+<div id="credit">Samples: NightLPBD (Hasan &amp; Ahsan, CC BY 4.0) and Bangladesh Vehicle Number Plate Detection Dataset (CC BY 4.0); videos are built from these photos.</div>
 <main>
   <section>
     <div id="stage">
@@ -208,6 +217,35 @@ $('live').onclick = async () => {
   await video.play();
   $('live').textContent = 'Stop';
   start('phone');
+};
+
+async function playVideo(url) {
+  stop();
+  video.src = url;
+  video.controls = true;
+  video.onended = () => { setTimeout(stop, 2000); };
+  await video.play();
+  $('live').textContent = 'Stop';
+  start('video');
+}
+
+async function runPhoto(blob, url) {
+  stop();
+  lastBlob = blob;
+  $('compare').disabled = false;
+  still.src = url;
+  await still.decode();
+  video.hidden = true; still.hidden = false;
+  show(await post(`/predict?pipeline=${select.value}`, blob), still);
+}
+
+$('sample').onchange = async (e) => {
+  const path = e.target.value;
+  e.target.value = '';
+  if (!path) return;
+  if (path.startsWith('videos/')) return playVideo(`/samples/${path}`);
+  const blob = await (await fetch(`/samples/${path}`)).blob();
+  runPhoto(blob, URL.createObjectURL(blob));
 };
 
 $('file').onchange = async (e) => {

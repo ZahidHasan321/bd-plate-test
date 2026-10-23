@@ -26,7 +26,9 @@ Claude Code reads `CLAUDE.md` and runs the steps below for you.
 
    The tunnel link is public while it runs (anyone who has it can use the page); stop it with Ctrl+C.
 
-4. Pick a pipeline from the dropdown (default `avro-s-cctv`), then:
+4. Pick a model (the dropdown groups them: **★ Recommended** `avro-s-cctv`, Faster, Other, Reference, Baseline —
+   the line under it shows each model's test numbers), then:
+   - **Try a sample…** — built-in night/day photos and two short videos (see `samples/README.md`).
    - **Camera** — phone (or laptop) camera, live.
    - **Video** — play a video file from this device (e.g. CCTV footage on a laptop); it is processed as it plays.
    - **Photo** — a single picture. **Compare all** runs the last frame through every pipeline.

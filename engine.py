@@ -159,6 +159,7 @@ class Pipeline:
     detector: dict
     reader: dict
     vehicles: dict | None = None
+    tag: str = "reference"
 
     def detect(self, img):
         v = self.vehicles
@@ -222,5 +223,5 @@ class Pipeline:
 def load_pipelines() -> dict[str, Pipeline]:
     cfg = yaml.safe_load((ROOT / "pipelines.yaml").read_text())["pipelines"]
     return {name: Pipeline(name=name, note=p.get("note", ""), detector=p["detector"], reader=p["reader"],
-                             vehicles=p.get("vehicles"))
+                             vehicles=p.get("vehicles"), tag=p.get("tag", "reference"))
             for name, p in cfg.items()}

@@ -30,6 +30,7 @@ templates = Jinja2Templates(directory=ROOT / "templates")
 app = FastAPI()
 (ROOT / "events").mkdir(exist_ok=True)
 app.mount("/events", StaticFiles(directory=ROOT / "events"), name="events")
+app.mount("/samples", StaticFiles(directory=ROOT / "samples"), name="samples")
 _last_save: dict[str, float] = {}
 db = connect()
 db_lock = threading.Lock()
@@ -68,9 +69,16 @@ def record(result: dict) -> dict:
     return result
 
 
+GROUPS = [("recommended", "★ Recommended"), ("fast", "Faster"), ("alternative", "Other good options"),
+          ("reference", "Reference (older / heavy)"), ("baseline", "Baseline (not for Bangla)")]
+
+
 @app.get("/")
 def index(request: Request):
-    return templates.TemplateResponse(request, "index.html", {"pipelines": pipelines.values()})
+    groups = [(label, [p for p in pipelines.values() if p.tag == tag]) for tag, label in GROUPS]
+    samples = {kind: sorted(f.name for f in (ROOT / "samples" / kind).iterdir() if not f.name.startswith("."))
+               for kind in ("photos", "videos")}
+    return templates.TemplateResponse(request, "index.html", {"groups": groups, "samples": samples})
 
 
 @app.post("/predict")

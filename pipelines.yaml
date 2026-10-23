@@ -1,82 +1,100 @@
 # Each pipeline = plate detector + plate reader. Add a model: export it to weights/onnx/, add an entry.
+#   tag: recommended | fast | alternative | reference | baseline   (groups the page's dropdown)
 #   detector.type: yolo (our ONNX, 1 class) | oim (open-image-models hub model)
 #   reader.type:   yolo (ONNX character detector, Bangla tokens) | fpo (fast-plate-ocr hub model, Latin only)
 # Optional: conf (default detector 0.25, reader 0.25).
 #   vehicles: {path, conf, classes} -> run the plate detector inside each vehicle crop (cascade).
+# Numbers in notes: "CCTV" = plates found on 83 held-out night toll-booth CCTV frames;
+#                   "night test" = whole plate read correctly on 189 NightLPBD test images.
 
 pipelines:
   avro-s-cctv:
-    note: "Night models + plate detector further trained on night toll-booth CCTV frames. Reader YOLOv8s @640."
+    tag: recommended
+    note: "Best overall. CCTV: finds 99% of plates · night test: 72% fully correct · edge-friendly (YOLOv8n + YOLOv8s)."
     detector: {type: yolo, path: weights/onnx/cctv_detect.onnx}
     reader: {type: yolo, path: weights/onnx/night_read.onnx}
 
   avro-s-cctv-fast:
-    note: "avro-s-cctv with the 320px reader (~2x faster reading)."
+    tag: fast
+    note: "Same plate finder, reader at 320px: ~2x faster reading. CCTV: 99% found · night test: 72% fully correct."
     detector: {type: yolo, path: weights/onnx/cctv_detect.onnx}
     reader: {type: yolo, path: weights/onnx/night_read_320.onnx}
 
   avro-s-night:
-    note: "avro-s fine-tuned on NightLPBD + LPDB-A (Kaggle, Oct 2026). Detector YOLOv8n + reader YOLOv8s @640."
+    tag: alternative
+    note: "Night fine-tune without CCTV frames. CCTV: 88% found · night test: 74% fully correct (slightly better reader)."
     detector: {type: yolo, path: weights/onnx/night_detect.onnx}
     reader: {type: yolo, path: weights/onnx/night_read.onnx}
 
   avro-s-night-fast:
-    note: "Fine-tuned avro-s with a reader trained at 320px (~2x faster reader)."
+    tag: alternative
+    note: "avro-s-night with the 320px reader. CCTV: 88% found · night test: 70% fully correct."
     detector: {type: yolo, path: weights/onnx/night_detect.onnx}
     reader: {type: yolo, path: weights/onnx/night_read_320.onnx}
 
   avro-s:
-    note: "YOLOv8n detector + YOLOv8s reader. Likely best for cheap boards."
+    tag: reference
+    note: "Original AvroHabib models, before our training. CCTV: 85% found · night test: 62% fully correct."
     detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
     reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
 
   avro-s-fast:
-    note: "avro-s with the reader at 320px instead of 640 (~4x cheaper reader). Not retrained at 320 yet."
+    tag: reference
+    note: "Original reader squeezed to 320px without retraining: night test 44%. Use avro-s-cctv-fast instead."
     detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
     reader: {type: yolo, path: weights/onnx/avro_read_s_320.onnx}
 
   avro-n:
-    note: "YOLOv8n + YOLOv8n. Cheapest; safe on any NPU."
+    tag: reference
+    note: "Original YOLOv8n + YOLOv8n, cheapest. Night test: 47% fully correct."
     detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
     reader: {type: yolo, path: weights/onnx/avro_read_n.onnx}
 
   oim-avro-s:
-    note: "open-image-models YOLOv9-t 384 detector (MIT) + Avro YOLOv8s reader."
+    tag: reference
+    note: "open-image-models YOLOv9-t detector (MIT) + original reader. Night test: 47% fully correct."
     detector: {type: oim, model: yolo-v9-t-384-license-plate-end2end}
     reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
 
   rashed:
-    note: "Avro YOLOv8n detector + YOLO11n reader."
+    tag: reference
+    note: "Original detector + YOLO11n reader (rashedulalbab253). Night test: 38% fully correct."
     detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
     reader: {type: yolo, path: weights/onnx/rashed_read.onnx}
 
   blpd-lite:
-    note: "Avro YOLOv8n detector + BLPD YOLOv12n reader (attention: RK3588 support unverified)."
+    tag: reference
+    note: "Original detector + BLPD YOLOv12n reader. Night test: 48% fully correct. YOLOv12 on RK3588 unverified."
     detector: {type: yolo, path: weights/onnx/avro_detect_n.onnx}
     reader: {type: yolo, path: weights/onnx/blpd_read.onnx}
 
   blpd:
-    note: "BLPD as published: YOLOv12m + YOLOv12n. Heavy detector."
+    tag: reference
+    note: "BLPD as published (YOLOv12m + v12n). Fewest false boxes on CCTV (95%), but 82% found, night test 44%. Heavy."
     detector: {type: yolo, path: weights/onnx/blpd_detect.onnx}
     reader: {type: yolo, path: weights/onnx/blpd_read.onnx}
 
   maidul:
-    note: "YOLOv8m + YOLOv8m. Heavy accuracy reference."
+    tag: reference
+    note: "MaidulHasan YOLOv8m + YOLOv8m. Night test: 63% fully correct. Heavy (~3x slower)."
     detector: {type: yolo, path: weights/onnx/maidul_detect.onnx}
     reader: {type: yolo, path: weights/onnx/maidul_read.onnx}
 
   dhaka-cctv:
-    note: "Dhaka CCTV cascade: COCO YOLO26s vehicles -> YOLO26s plate detector fine-tuned on Dhaka CCTV vehicle crops -> Avro YOLOv8s reader."
+    tag: reference
+    note: "Vehicles -> plate detector trained on daytime Dhaka street CCTV -> original reader. Weak on night footage (17%)."
     vehicles: {path: weights/onnx/coco_vehicles.onnx, conf: 0.2, classes: [2, 3, 5, 7]}  # car, motorcycle, bus, truck
     detector: {type: yolo, path: weights/onnx/dhaka_detect.onnx, conf: 0.35}
     reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
 
   dhaka-direct:
-    note: "Dhaka CCTV plate detector on the whole frame (no vehicle stage) -> Avro YOLOv8s reader. For close-ups."
+    tag: reference
+    note: "Dhaka street-CCTV plate detector on the whole frame -> original reader. Weak on night footage (19%)."
     detector: {type: yolo, path: weights/onnx/dhaka_detect.onnx, conf: 0.35}
     reader: {type: yolo, path: weights/onnx/avro_read_s.onnx}
 
   global:
-    note: "Baseline: fast-alpr global models. Latin plates only, Bangla will read as junk."
+    tag: baseline
+    note: "fast-alpr global models: Latin plates only, Bangla plates read as junk. For comparison."
     detector: {type: oim, model: yolo-v9-t-384-license-plate-end2end}
     reader: {type: fpo, model: cct-s-v2-global-model}
