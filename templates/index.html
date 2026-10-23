@@ -15,12 +15,14 @@
   #credit { padding: 2px 16px 0; font-size: 12px; color: #9a9a9a; }
   main { display: grid; gap: 0 16px; }
   @media (min-width: 900px) { main { grid-template-columns: 1fr 400px; } }
-  #stage { position: relative; width: 100%; }
-  #stage video, #stage img { width: 100%; display: block; }
-  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  [hidden] { display: none !important; }
+  #stage { position: relative; width: fit-content; max-width: 100%; margin: 0 auto; }
+  #stage video, #stage img { display: block; max-width: 100%; max-height: 70vh; width: auto; height: auto; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #stats { padding: 6px 16px; font-size: 13px; color: #aaa; }
   #plates { padding: 0 16px 16px; }
-  .plate { font-size: 20px; font-family: monospace; margin: 6px 0; }
+  .plate { font-size: 20px; font-family: monospace; margin: 8px 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .plate img { height: 64px; max-width: 220px; object-fit: contain; background: #000; border-radius: 4px; }
   .bn { font-family: system-ui, sans-serif; }
   .plate small { font-size: 13px; color: #aaa; }
   .ok { color: #3f3; } .bad { color: #f93; }
@@ -81,7 +83,7 @@ const still = document.createElement('img');
 still.hidden = true;
 video.after(still);
 const grab = document.createElement('canvas');
-let running = false, lastBlob = null, source = 'phone';
+let running = false, lastBlob = null, source = 'phone', run = 0;  // run: ignore answers from a stopped loop
 
 try { const saved = localStorage.getItem('pipeline'); if (saved) select.value = saved; } catch {}
 const showNote = () => $('note').textContent = select.selectedOptions[0].dataset.note;
@@ -119,7 +121,8 @@ function show(data, el) {
   }
   $('stats').textContent = `${data.pipeline} · ${data.width}x${data.height} · detect ${data.ms.detect} ms · read ${data.ms.read} ms · round trip ${data.roundtrip} ms`;
   $('plates').innerHTML = data.plates.map(p =>
-    `<div class="plate">${plateText(p)} <small>det ${p.det_conf} · read ${p.conf ?? '-'}</small></div>`).join('');
+    `<div class="plate">${p.crop_jpg ? `<img src="data:image/jpeg;base64,${p.crop_jpg}" alt="plate crop">` : ''}
+      <div>${plateText(p)}<br><small>det ${p.det_conf} · read ${p.conf ?? '-'}</small></div></div>`).join('');
 }
 
 function showTable(data) {
@@ -183,18 +186,22 @@ async function frameBlob() {
 }
 
 async function loop() {
-  while (running) {
+  const mine = ++run;
+  while (running && mine === run) {
     if (video.paused || video.ended) { await new Promise(r => setTimeout(r, 200)); continue; }
     lastBlob = await frameBlob();
     $('compare').disabled = false;
-    try { show(await post(`/predict?pipeline=${select.value}&source=${source}`, lastBlob), video); }
-    catch (e) { $('stats').textContent = e; }
+    try {
+      const data = await post(`/predict?pipeline=${select.value}&source=${source}`, lastBlob);
+      if (running && mine === run) show(data, video);
+    } catch (e) { $('stats').textContent = e; }
   }
 }
 
 function stop() {
   if (running) fetch(`/close?source=${source}`, { method: 'POST' }).then(refreshCars);
   running = false;
+  run++;
   if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
   video.pause();
   $('live').textContent = 'Camera';

@@ -5,6 +5,7 @@ Frames sent with `source=phone|video` also go through the vehicle tracker (track
 in events.db, shown in the page's Vehicles list (/vehicles) with confirm / correct (/vehicles/<id>).
 """
 
+import base64
 import csv
 import threading
 import time
@@ -65,7 +66,8 @@ def record(result: dict) -> dict:
                 w.writerow([stamp, name, p["text"], p["bangla"], p["valid"], p["det_conf"], p["conf"],
                             result["ms"]["detect"], result["ms"]["read"], crop.relative_to(ROOT)])
     for p in result["plates"]:
-        del p["crop"]
+        # Small JPEG of the plate for the page (shown next to its reading).
+        p["crop_jpg"] = base64.b64encode(cv2.imencode(".jpg", p.pop("crop"), [cv2.IMWRITE_JPEG_QUALITY, 85])[1]).decode()
     return result
 
 
