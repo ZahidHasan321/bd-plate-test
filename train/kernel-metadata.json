@@ -1,9 +1,9 @@
 {
   "id": "zahidhasan530/bd-plate-avro-s-night-finetune",
   "title": "BD plate avro-s night finetune",
-  "code_file": "train_kaggle.py",
+  "code_file": "train_kaggle.ipynb",
   "language": "python",
-  "kernel_type": "script",
+  "kernel_type": "notebook",
   "is_private": true,
   "enable_gpu": true,
   "enable_internet": true,
