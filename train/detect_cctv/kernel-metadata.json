@@ -1,0 +1,16 @@
+{
+  "id": "zahidhasan530/bd-plate-detect-cctv",
+  "title": "BD plate detect cctv",
+  "code_file": "train_detect_cctv.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "thasan3003/nightlpbd-nighttime-license-plates-of-bangladesh",
+    "zahidhasan530/bd-tollbooth-cctv-plates-train"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

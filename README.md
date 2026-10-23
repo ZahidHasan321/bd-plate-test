@@ -33,12 +33,14 @@ Green box = reading matches the BD plate format (district + letter + 6 digits); 
 
 ## Pipelines
 
-Defined in `pipelines.yaml` (plate detector → character reader). Best so far for cheap edge devices: **`avro-s-night`** (or `avro-s-night-fast` for ~2× faster reading).
+Defined in `pipelines.yaml` (plate detector → character reader). Best so far for cheap edge devices: **`avro-s-cctv`** (or `avro-s-cctv-fast` for ~2× faster reading).
 
 | Pipeline | Detector → reader | Notes |
 |---|---|---|
-| **`avro-s-night`** | YOLOv8n → YOLOv8s, fine-tuned | **74%** plates fully correct on NightLPBD test (was 62%) |
-| **`avro-s-night-fast`** | same, reader trained at 320px | **70%**, reader ~2× faster |
+| **`avro-s-cctv`** | night models + detector trained on toll-booth CCTV | finds **99%** of plates on held-out CCTV frames (was 88%); 72% plates fully correct on NightLPBD |
+| **`avro-s-cctv-fast`** | same, 320px reader | same detection, reader ~2× faster |
+| `avro-s-night` | YOLOv8n → YOLOv8s, fine-tuned | **74%** plates fully correct on NightLPBD test (was 62%) |
+| `avro-s-night-fast` | same, reader trained at 320px | **70%**, reader ~2× faster |
 | `avro-s` | YOLOv8n → YOLOv8s (original Avro) | 62%; runs on Jetson & RK3588 |
 | `avro-s-fast` | original reader run at 320px | 44% — use `avro-s-night-fast` instead |
 | `avro-n` | YOLOv8n → YOLOv8n | cheapest |
@@ -73,6 +75,9 @@ Runs unchanged on an edge board with onnxruntime.
 
 `train/train_kaggle.py` fine-tunes `avro-s` on NightLPBD (night plates) + LPDB-A on a free Kaggle GPU:
 `cd train && uvx kaggle kernels push -p .` (edit the `id` in `kernel-metadata.json` to your Kaggle username).
+
+Also `train/detect_cctv/`: further trains the plate detector on a private CCTV dataset (needs that dataset on your
+Kaggle account; edit `kernel-metadata.json`).
 
 ## Add a model
 

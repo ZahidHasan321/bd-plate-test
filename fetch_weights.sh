@@ -26,6 +26,9 @@ for f in detect read read_320; do
   [ -f weights/raw/night/$f.pt ] || { mkdir -p weights/raw/night; echo "downloading night/$f.pt";
     curl -fsSL -o weights/raw/night/$f.pt "$REL/night_$f.pt"; }
 done
+# Plate detector further trained on night toll-booth CCTV.
+[ -f weights/raw/cctv/detect.pt ] || { mkdir -p weights/raw/cctv; echo "downloading cctv/detect.pt";
+  curl -fsSL -o weights/raw/cctv/detect.pt https://github.com/ZahidHasan321/bd-plate-test/releases/download/cctv-v1/cctv_detect.pt; }
 [ -f weights/raw/coco/vehicles.pt ] || { mkdir -p weights/raw/coco; curl -fsSL -o weights/raw/coco/vehicles.pt \
   https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.pt; }
 

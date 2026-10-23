@@ -5,6 +5,16 @@
 #   vehicles: {path, conf, classes} -> run the plate detector inside each vehicle crop (cascade).
 
 pipelines:
+  avro-s-cctv:
+    note: "Night models + plate detector further trained on night toll-booth CCTV frames. Reader YOLOv8s @640."
+    detector: {type: yolo, path: weights/onnx/cctv_detect.onnx}
+    reader: {type: yolo, path: weights/onnx/night_read.onnx}
+
+  avro-s-cctv-fast:
+    note: "avro-s-cctv with the 320px reader (~2x faster reading)."
+    detector: {type: yolo, path: weights/onnx/cctv_detect.onnx}
+    reader: {type: yolo, path: weights/onnx/night_read_320.onnx}
+
   avro-s-night:
     note: "avro-s fine-tuned on NightLPBD + LPDB-A (Kaggle, Oct 2026). Detector YOLOv8n + reader YOLOv8s @640."
     detector: {type: yolo, path: weights/onnx/night_detect.onnx}

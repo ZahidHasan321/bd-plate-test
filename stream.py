@@ -44,8 +44,10 @@ def iou(a, b):
 
 
 def vote(track: Track) -> dict:
-    """Most confident-weighted reading; readings that match the BD plate format win over ones that don't."""
-    valid = [r for r in track.readings if r[2]]
+    """Most confident-weighted reading. Readings that match the BD plate format win, but only if the same
+    reading was seen at least twice; a one-off format match is often a misread."""
+    seen = Counter(r[0] for r in track.readings if r[2])
+    valid = [r for r in track.readings if r[2] and (seen[r[0]] >= 2 or len(track.readings) < 3)]
     pool = valid or [r for r in track.readings if r[0]]
     if not pool:
         return {"text": "", "bangla": "", "valid": False, "votes": 0}

@@ -15,7 +15,7 @@ Phone-camera test bench for Bangladeshi licence-plate recognition. Python, FastA
    - `./run.sh` — phone on the same Wi-Fi; give the printed `https://<ip>:8000` and tell them to tap
      *Advanced → Proceed* on the certificate warning once. If the phone can't connect, check the computer's
      firewall allows port 8000.
-4. Tell the user: choose a pipeline in the dropdown (`avro-s-night` is the best cheap one; `avro-s-night-fast` is faster), press **Start live** or
+4. Tell the user: choose a pipeline in the dropdown (`avro-s-cctv` is the best cheap one; `avro-s-cctv-fast` is faster), press **Start live** or
    **Photo**, and **Compare all** to compare every pipeline on the same frame.
 
 ## Layout
