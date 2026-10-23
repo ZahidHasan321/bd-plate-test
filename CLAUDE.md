@@ -15,16 +15,18 @@ Phone-camera test bench for Bangladeshi licence-plate recognition. Python, FastA
    - `./run.sh` — phone on the same Wi-Fi; give the printed `https://<ip>:8000` and tell them to tap
      *Advanced → Proceed* on the certificate warning once. If the phone can't connect, check the computer's
      firewall allows port 8000.
-4. Tell the user: choose a pipeline in the dropdown (`avro-s-cctv` is the best cheap one; `avro-s-cctv-fast` is faster), press **Start live** or
-   **Photo**, and **Compare all** to compare every pipeline on the same frame.
+4. Tell the user: choose a pipeline in the dropdown (`avro-s-cctv` is the best cheap one; `avro-s-cctv-fast` is faster),
+   then **Camera** (live), **Video** (play a video file from that device) or **Photo**. The **Vehicles** list shows one
+   row per vehicle with ✓ Correct / ✎ Fix; **Compare all** compares every pipeline on the last frame.
 
 ## Layout
 
 - `engine.py` — YOLO ONNX runner, BD plate grammar (`assemble`), pipelines from `pipelines.yaml`.
 - `app.py` + `templates/index.html` — web app; `/predict?pipeline=`, `/compare`.
 - `bench.py` — batch evaluation (`--truth gt.csv` for accuracy).
-- `stream.py` — RTSP/video/webcam → tracking + voting → one JSON event per vehicle (`events.jsonl`, `--post URL`).
+- `tracker.py` — per-vehicle logic shared by app and stream: tracking, voting, dedup, needs_review, `events.db`.
+- `stream.py` — RTSP/video/webcam → tracker; reconnects, `--post URL` with durable retry.
 - `export.py` — `.pt` → ONNX (needs `uv run --group export`).
 - `train/` — Kaggle fine-tuning job.
 
-Do not commit `weights/`, `captures/`, `results.csv`, `events/`, `events.jsonl`, `cert.pem`, `key.pem`.
+Do not commit `weights/`, `captures/`, `results.csv`, `events/`, `events.jsonl`, `events.db*`, `cert.pem`, `key.pem`.

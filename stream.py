@@ -1,152 +1,200 @@
-"""Read a camera / video, track plates across frames, vote, and emit one event per vehicle.
+"""Read a camera / video, track plates across frames, vote, and record one event per vehicle.
 
 Usage:
-  uv run python stream.py <source> [-p avro-s-cctv] [--fps 5] [--camera gate-1] [--post URL]
+  uv run python stream.py <source> [-p avro-s-cctv] [--camera gate-1] [--post URL]
     source: rtsp://user:pass@ip/stream | video.mp4 | 0 (webcam)
 
-Each event is printed as a JSON line, appended to events.jsonl, its best plate crop saved under
-events/, and (with --post) sent as JSON to a central server.
+Events go to events.db (SQLite, survives reboots/power cuts), are printed as JSON lines and appended to
+events.jsonl, with the best plate crop under events/<camera>/. With --post, a background sender delivers
+every new or updated event to a central server, retrying until it answers 2xx. Each event carries a stable
+`id` and a `version`: the server should upsert by id (repeats are harmless).
+
+Live-camera handling: reconnect with backoff, reconnect on a frozen stream, always use the newest frame,
+timestamps taken when the frame is grabbed. Event logic: a vehicle is reported once it is confidently read
+(early, even if it is still standing still) and the record is updated as better readings arrive; the same
+plate on the same camera within --dedup seconds (digits equal or one digit off) updates the earlier event
+instead of creating a new one; plates that are seen clearly but cannot be read become status "needs_review".
 """
 
 import argparse
 import json
+import threading
 import time
 import urllib.request
-from collections import Counter
-from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 
 import cv2
 
 from engine import load_pipelines
+from tracker import ROOT, PlateTracker, Settings, connect
 
-ROOT = Path(__file__).parent
+# ---------------------------------------------------------------- frame sources
+class FileSource:
+    """Video file: every Nth frame, timestamps from the video's own clock."""
 
+    live = False
 
-@dataclass
-class Track:
-    id: int
-    box: list
-    first: float
-    last: float
-    readings: list = field(default_factory=list)  # (text, bangla, valid, conf)
-    best_crop: object = None
-    best_conf: float = -1.0
+    def __init__(self, path, fps):
+        self.cap = cv2.VideoCapture(path)
+        if not self.cap.isOpened():
+            raise SystemExit(f"cannot open {path}")
+        self.video_fps = self.cap.get(cv2.CAP_PROP_FPS) or 25
+        self.step = max(1, round(self.video_fps / fps))
+        self.start, self.n = time.time(), 0
 
+    def frames(self):
+        while True:
+            ok, frame = self.cap.read()
+            if not ok:
+                return
+            self.n += 1
+            if self.n % self.step == 0:
+                yield self.start + self.n / self.video_fps, frame
 
-def iou(a, b):
-    ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
-    iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
-    inter = ix * iy
-    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
-    return inter / union if union else 0.0
-
-
-def vote(track: Track) -> dict:
-    """Most confident-weighted reading. Readings that match the BD plate format win, but only if the same
-    reading was seen at least twice; a one-off format match is often a misread."""
-    seen = Counter(r[0] for r in track.readings if r[2])
-    valid = [r for r in track.readings if r[2] and (seen[r[0]] >= 2 or len(track.readings) < 3)]
-    pool = valid or [r for r in track.readings if r[0]]
-    if not pool:
-        return {"text": "", "bangla": "", "valid": False, "votes": 0}
-    weight = Counter()
-    for text, _, _, conf in pool:
-        weight[text] += conf or 0.01
-    text = weight.most_common(1)[0][0]
-    bangla = next(r[1] for r in pool if r[0] == text)
-    return {"text": text, "bangla": bangla, "valid": bool(valid),
-            "votes": sum(r[0] == text for r in pool), "readings": len(track.readings)}
+    def status(self):
+        return {"connected": True}
 
 
-def emit(track: Track, args) -> None:
-    result = vote(track)
-    if track.readings and len(track.readings) >= args.min_readings and result["text"]:
-        stamp = datetime.fromtimestamp(track.first).strftime("%Y%m%d_%H%M%S")
-        crop = ROOT / "events" / f"{args.camera}_{stamp}_{track.id}.jpg"
-        crop.parent.mkdir(exist_ok=True)
-        if track.best_crop is not None:
-            cv2.imwrite(str(crop), track.best_crop)
-        event = {"camera": args.camera, "plate": result["text"], "bangla": result["bangla"],
-                 "valid": result["valid"], "votes": result["votes"], "readings": result["readings"],
-                 "first_seen": datetime.fromtimestamp(track.first).isoformat(timespec="seconds"),
-                 "last_seen": datetime.fromtimestamp(track.last).isoformat(timespec="seconds"),
-                 "crop": str(crop.relative_to(ROOT))}
-        line = json.dumps(event, ensure_ascii=False)
-        print(line, flush=True)
-        with open(ROOT / "events.jsonl", "a") as f:
-            f.write(line + "\n")
-        if args.post:
-            try:
-                req = urllib.request.Request(args.post, data=line.encode(), method="POST",
-                                             headers={"Content-Type": "application/json"})
-                urllib.request.urlopen(req, timeout=5)
-            except OSError as e:
-                print(f"post failed: {e}", flush=True)
+class LiveSource:
+    """RTSP / webcam: a reader thread keeps only the newest frame (no queued lag), reconnects with backoff
+    when the stream fails, and also reconnects when frames stop changing (frozen stream that still 'works')."""
+
+    live = True
+
+    def __init__(self, src, fps, stale=5.0):
+        self.src, self.fps, self.stale = src, fps, stale
+        self.lock = threading.Lock()
+        self.frame, self.stamp, self.seq = None, 0.0, 0
+        self.connected, self.reconnects, self.last_change = False, 0, time.time()
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    def _open(self):
+        cap = cv2.VideoCapture(self.src)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        return cap
+
+    def _reader(self):
+        backoff = 1.0
+        while True:
+            cap = self._open()
+            if not cap.isOpened():
+                self.connected = False
+                print(f"[source] cannot open stream, retry in {backoff:.0f}s", flush=True)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30)
+                continue
+            self.connected, backoff, last_sig = True, 1.0, None
+            self.last_change = time.time()
+            print("[source] connected", flush=True)
+            while True:
+                ok, frame = cap.read()
+                now = time.time()
+                if not ok:
+                    print("[source] stream lost", flush=True)
+                    break
+                sig = cv2.resize(frame, (32, 18), interpolation=cv2.INTER_AREA).tobytes()
+                if sig != last_sig:
+                    last_sig, self.last_change = sig, now
+                elif now - self.last_change > self.stale:
+                    print(f"[source] frozen for {self.stale:.0f}s, reconnecting", flush=True)
+                    break
+                with self.lock:
+                    self.frame, self.stamp, self.seq = frame, now, self.seq + 1
+            cap.release()
+            self.connected = False
+            self.reconnects += 1
+            time.sleep(1)
+
+    def frames(self):
+        seen = 0
+        while True:
+            time.sleep(1 / self.fps)
+            with self.lock:
+                if self.seq == seen or self.frame is None:
+                    continue
+                seen, frame, stamp = self.seq, self.frame, self.stamp
+            yield stamp, frame
+
+    def status(self):
+        return {"connected": self.connected, "reconnects": self.reconnects,
+                "last_frame_age": round(time.time() - self.stamp, 1) if self.stamp else None}
+
+
+# ---------------------------------------------------------------- sender
+def post_json(url, row):
+    body = json.dumps(row, ensure_ascii=False).encode()
+    req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return 200 <= r.status < 300
+
+
+def sender(url):
+    """Deliver new/updated events until the server accepts them; survives restarts (state is in SQLite)."""
+    db, backoff = connect(), 2.0
+    while True:
+        rows = db.execute("SELECT * FROM events WHERE sent_version < version ORDER BY last_seen LIMIT 50").fetchall()
+        if not rows:
+            time.sleep(2)
+            continue
+        try:
+            for r in rows:
+                row = {k: r[k] for k in r.keys() if k != "sent_version"}
+                if post_json(url, row):
+                    db.execute("UPDATE events SET sent_version=? WHERE id=?", (r["version"], r["id"]))
+                    db.commit()
+            backoff = 2.0
+        except OSError as e:
+            print(f"[sender] server unreachable ({e}); {len(rows)} event(s) queued, retry in {backoff:.0f}s", flush=True)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 60)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("source")
     ap.add_argument("-p", "--pipeline", default="avro-s-cctv")
-    ap.add_argument("--fps", type=float, default=5, help="frames processed per second")
     ap.add_argument("--camera", default="cam1")
-    ap.add_argument("--post", help="URL to POST each event to")
-    ap.add_argument("--gone", type=float, default=1.5, help="seconds unseen before a vehicle is finalised")
-    ap.add_argument("--min-readings", type=int, default=2)
+    ap.add_argument("--fps", type=float, default=5, help="frames processed per second")
+    ap.add_argument("--post", help="URL to POST events to (retried until accepted)")
+    ap.add_argument("--gone", type=float, default=1.5, help="seconds unseen before a vehicle's track closes")
+    ap.add_argument("--early", type=float, default=2.0, help="report a confident read after this many seconds")
+    ap.add_argument("--dedup", type=float, default=120, help="same plate on this camera within N s = same vehicle")
+    ap.add_argument("--single-conf", type=float, default=0.85, help="trust a single valid reading above this")
+    ap.add_argument("--min-plate-px", type=int, default=40, help="plate crops narrower than this are low quality")
+    ap.add_argument("--min-sharpness", type=float, default=20, help="Laplacian variance below this = blurry")
+    ap.add_argument("--review-after", type=int, default=3, help="unreadable after N readings -> needs_review")
+    ap.add_argument("--ignore", action="append", default=[], metavar="x1,y1,x2,y2",
+                    help="ignore plates whose centre is in this region (fractions 0-1), e.g. timestamp overlay")
     args = ap.parse_args()
 
+    if args.post:
+        threading.Thread(target=sender, args=(args.post,), daemon=True).start()
+    tracker = PlateTracker(args.camera, Settings(
+        gone=args.gone, early=args.early, dedup=args.dedup, single_conf=args.single_conf,
+        min_plate_px=args.min_plate_px, min_sharpness=args.min_sharpness, review_after=args.review_after,
+        ignore=tuple(tuple(map(float, r.split(","))) for r in args.ignore)), log=lambda l: print(l, flush=True))
     pipe = load_pipelines()[args.pipeline]
-    src = int(args.source) if args.source.isdigit() else args.source
-    cap = cv2.VideoCapture(src)
-    if not cap.isOpened():
-        raise SystemExit(f"cannot open {args.source}")
-    is_file = isinstance(src, str) and not src.startswith(("rtsp", "http"))
-    video_fps = cap.get(cv2.CAP_PROP_FPS) or 25
-    step = max(1, round(video_fps / args.fps)) if is_file else 1
+    is_live = args.source.isdigit() or args.source.startswith(("rtsp", "http"))
+    src = LiveSource(int(args.source) if args.source.isdigit() else args.source, args.fps) if is_live \
+        else FileSource(args.source, args.fps)
+    heartbeat = ROOT / "events" / f"heartbeat_{args.camera}.json"
 
-    start = time.time()
-    tracks: list[Track] = []
-    next_id, frame_no, processed, last_run, busy = 1, 0, 0, 0.0, 0.0
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        frame_no += 1
-        # Video files: use their own clock and every Nth frame. Live: process at most --fps per second.
-        now = start + frame_no / video_fps if is_file else time.time()
-        if is_file and frame_no % step:
-            continue
-        if not is_file and now - last_run < 1 / args.fps:
-            continue
-        last_run = now
+    processed, busy, last_beat = 0, 0.0, 0.0
+    for now, frame in src.frames():
         processed += 1
         t0 = time.perf_counter()
         res = pipe.run(frame)
         busy += time.perf_counter() - t0
-
-        for p in res["plates"]:
-            match = max(tracks, key=lambda t: iou(t.box, p["box"]), default=None)
-            if match is None or iou(match.box, p["box"]) < 0.2:
-                match = Track(next_id, p["box"], now, now)
-                tracks.append(match)
-                next_id += 1
-            match.box, match.last = p["box"], now
-            match.readings.append((p["text"], p["bangla"], p["valid"], p["conf"]))
-            score = (p["conf"] or 0) + p["det_conf"]
-            if score > match.best_conf:
-                match.best_conf, match.best_crop = score, p["crop"]
-
-        for t in [t for t in tracks if now - t.last > args.gone]:
-            emit(t, args)
-            tracks.remove(t)
-
-    for t in tracks:
-        emit(t, args)
-    print(f"done: {frame_no} frames read, {processed} processed, "
-          f"{busy / max(processed, 1) * 1000:.0f} ms per processed frame", flush=True)
-
+        tracker.update(now, frame.shape, res["plates"])
+        if time.time() - last_beat > 10:
+            last_beat = time.time()
+            heartbeat.write_text(json.dumps({"camera": args.camera, "time": datetime.now().isoformat(timespec="seconds"),
+                                             "processed": processed, "open_tracks": len(tracker.tracks),
+                                             "ms_per_frame": round(busy / max(processed, 1) * 1000), **src.status()}))
+    tracker.close_all()  # end of a video file
+    print(f"done: {processed} frames processed, {busy / max(processed, 1) * 1000:.0f} ms per frame", flush=True)
+    if args.post:
+        time.sleep(3)  # give the sender a moment to flush before a file run exits
 
 if __name__ == "__main__":
     main()

@@ -26,8 +26,15 @@ Claude Code reads `CLAUDE.md` and runs the steps below for you.
 
    The tunnel link is public while it runs (anyone who has it can use the page); stop it with Ctrl+C.
 
-4. On the phone: pick a pipeline from the dropdown, then **Start live** (camera) or **Photo**.
-   **Compare all** runs the last frame through every pipeline and shows a table.
+4. Pick a pipeline from the dropdown (default `avro-s-cctv`), then:
+   - **Camera** — phone (or laptop) camera, live.
+   - **Video** — play a video file from this device (e.g. CCTV footage on a laptop); it is processed as it plays.
+   - **Photo** — a single picture. **Compare all** runs the last frame through every pipeline.
+
+   The **Vehicles** list shows **one row per vehicle**: plate crop, English + Bangla text, and a badge —
+   *read*, *needs review* (seen clearly but not readable), or *confirmed*. A car that waits, is hidden for a
+   moment, or comes back within 2 minutes stays one row (same 6 digits, or one digit off), and its reading
+   improves while it is in view. **✓ Correct** / **✎ Fix** confirm or correct a row; **Clear** empties the list.
 
 Green box = reading matches the BD plate format (district + letter + 6 digits); orange = it doesn't.
 
@@ -58,9 +65,11 @@ uv run python stream.py rtsp://user:pass@CAMERA_IP/stream --camera gate-1   # IP
 uv run python stream.py video.mp4                                            # video file
 uv run python stream.py 0                                                    # webcam
 ```
-Processes ~5 frames/s (`--fps`), follows each plate across frames, votes over the readings, and when the
-vehicle leaves prints one JSON event (plate, Bangla, votes, time), appends it to `events.jsonl`, saves the best
-crop in `events/`, and with `--post http://server/api` sends it to a central server.
+Same vehicle logic as the web page (`tracker.py`): ~5 frames/s, one record per vehicle in `events.db`
+(updated as readings improve), best crop in `events/<camera>/`, a log line in `events.jsonl`. With
+`--post http://server/api` every new/updated record is sent with a stable `id` + `version` and retried until the
+server answers 2xx (upsert by `id` on the server). Live cameras reconnect automatically, including when the
+stream freezes. `--ignore x1,y1,x2,y2` skips a region (e.g. the camera's timestamp overlay); see `--help`.
 
 ## Benchmark on a folder of images
 

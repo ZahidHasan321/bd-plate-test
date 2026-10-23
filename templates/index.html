@@ -10,19 +10,32 @@
   button, label.btn, select { background: #2d6cdf; color: #fff; border: 0; border-radius: 6px; padding: 10px 14px; font-size: 15px; }
   select { background: #222; border: 1px solid #444; max-width: 100%; }
   button:disabled { opacity: .4; }
+  button.small { padding: 6px 10px; font-size: 13px; background: #333; }
   #note { padding: 0 16px; font-size: 13px; color: #aaa; }
+  main { display: grid; gap: 0 16px; }
+  @media (min-width: 900px) { main { grid-template-columns: 1fr 400px; } }
   #stage { position: relative; width: 100%; }
   #stage video, #stage img { width: 100%; display: block; }
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
   #stats { padding: 6px 16px; font-size: 13px; color: #aaa; }
   #plates { padding: 0 16px 16px; }
   .plate { font-size: 20px; font-family: monospace; margin: 6px 0; }
-  .plate .bn { font-family: system-ui, sans-serif; }
+  .bn { font-family: system-ui, sans-serif; }
   .plate small { font-size: 13px; color: #aaa; }
   .ok { color: #3f3; } .bad { color: #f93; }
   table { border-collapse: collapse; margin: 0 16px 16px; font-size: 14px; }
   td, th { border-bottom: 1px solid #333; padding: 6px 8px; text-align: left; vertical-align: top; }
   .wrap { overflow-x: auto; }
+  aside { padding: 0 16px 16px; }
+  aside h2 { font-size: 16px; margin: 10px 0; display: flex; justify-content: space-between; align-items: center; }
+  .car { display: grid; grid-template-columns: 120px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid #333; }
+  .car img { width: 120px; height: 60px; object-fit: contain; background: #000; border-radius: 4px; }
+  .car .num { font-family: monospace; font-size: 17px; }
+  .car .meta { font-size: 12px; color: #aaa; margin-top: 2px; }
+  .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+  .b-ok { background: #1f5f2a; } .b-review { background: #7a4a00; } .b-done { background: #234a8a; }
+  .car .actions { margin-top: 6px; display: flex; gap: 6px; }
+  #empty { color: #888; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -30,18 +43,27 @@
   <select id="pipeline">
     {% for p in pipelines %}<option value="{{ p.name }}" data-note="{{ p.note }}">{{ p.name }}</option>{% endfor %}
   </select>
-  <button id="live">Start live</button>
+  <button id="live">Camera</button>
+  <label class="btn">Video<input id="file" type="file" accept="video/*" hidden></label>
   <label class="btn">Photo<input id="photo" type="file" accept="image/*" capture="environment" hidden></label>
   <button id="compare" disabled>Compare all</button>
 </header>
 <div id="note"></div>
-<div id="stage">
-  <video id="video" playsinline muted hidden></video>
-  <canvas id="overlay"></canvas>
-</div>
-<div id="stats"></div>
-<div id="plates"></div>
-<div class="wrap"><table id="table" hidden></table></div>
+<main>
+  <section>
+    <div id="stage">
+      <video id="video" playsinline muted hidden></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div id="stats"></div>
+    <div id="plates"></div>
+    <div class="wrap"><table id="table" hidden></table></div>
+  </section>
+  <aside>
+    <h2><span>Vehicles <span id="source-name" class="meta"></span></span><button class="small" id="clear">Clear</button></h2>
+    <div id="cars"><div id="empty">Start the camera or a video — each vehicle appears here once, and its reading improves as it stays in view.</div></div>
+  </aside>
+</main>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -50,12 +72,14 @@ const still = document.createElement('img');
 still.hidden = true;
 video.after(still);
 const grab = document.createElement('canvas');
-let running = false, lastBlob = null;
+let running = false, lastBlob = null, source = 'phone';
 
 try { const saved = localStorage.getItem('pipeline'); if (saved) select.value = saved; } catch {}
 const showNote = () => $('note').textContent = select.selectedOptions[0].dataset.note;
 select.onchange = () => { try { localStorage.setItem('pipeline', select.value); } catch {} showNote(); };
 showNote();
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 async function post(url, blob) {
   const form = new FormData();
@@ -69,7 +93,7 @@ async function post(url, blob) {
 }
 
 const plateText = (p) =>
-  `<span class="${p.valid ? 'ok' : 'bad'}">${p.text || '?'}</span>` + (p.bangla ? ` <span class="bn">${p.bangla}</span>` : '');
+  `<span class="${p.valid ? 'ok' : 'bad'}">${esc(p.text) || '?'}</span>` + (p.bangla ? ` <span class="bn">${esc(p.bangla)}</span>` : '');
 
 function show(data, el) {
   const r = el.getBoundingClientRect();
@@ -97,40 +121,111 @@ function showTable(data) {
   $('table').hidden = false;
 }
 
+// ---------------------------------------------------------------- vehicles list
+const time = (t) => new Date(t * 1000).toLocaleTimeString();
+async function refreshCars() {
+  $('source-name').textContent = `· ${source}`;
+  let cars;
+  try { cars = await (await fetch(`/vehicles?source=${source}`)).json(); } catch { return; }
+  if (!cars.length) return;
+  $('cars').innerHTML = cars.map(c => {
+    const badge = c.reviewed ? '<span class="badge b-done">confirmed</span>'
+      : c.status === 'ok' ? '<span class="badge b-ok">read</span>' : '<span class="badge b-review">needs review</span>';
+    const shown = c.reviewed ? c.reviewed_plate : c.plate;
+    return `<div class="car">
+      <img src="/${esc(c.crop)}?v=${c.last_seen}" alt="plate ${esc(shown)}">
+      <div>
+        <div class="num">${esc(shown) || '?'}${badge}</div>
+        <div class="bn">${c.reviewed ? '' : esc(c.bangla)}</div>
+        <div class="meta">${time(c.first_seen)} – ${time(c.last_seen)} · ${c.votes}/${c.readings} readings agree</div>
+        <div class="actions">
+          <button class="small" data-id="${c.id}" data-act="ok">✓ Correct</button>
+          <button class="small" data-id="${c.id}" data-act="fix" data-plate="${esc(shown)}">✎ Fix</button>
+        </div>
+      </div></div>`;
+  }).join('');
+}
+$('cars').onclick = async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  let plate = '';
+  if (b.dataset.act === 'fix') {
+    plate = prompt('Correct plate (e.g. DHAKA METRO-GA 12-3456):', b.dataset.plate);
+    if (!plate) return;
+  }
+  const form = new FormData(); form.append('plate', plate);
+  await fetch(`/vehicles/${b.dataset.id}`, { method: 'POST', body: form });
+  refreshCars();
+};
+$('clear').onclick = async () => {
+  if (!confirm(`Clear the ${source} vehicle list?`)) return;
+  await fetch(`/vehicles?source=${source}`, { method: 'DELETE' });
+  $('cars').innerHTML = '<div id="empty">Cleared.</div>';
+};
+setInterval(() => { if (running) refreshCars(); }, 1500);
+refreshCars();
+
+// ---------------------------------------------------------------- capture loop (camera or video file)
 async function frameBlob() {
-  const scale = Math.min(1, 1280 / video.videoWidth);
+  const scale = Math.min(1, 1920 / video.videoWidth);
   grab.width = video.videoWidth * scale; grab.height = video.videoHeight * scale;
   grab.getContext('2d').drawImage(video, 0, 0, grab.width, grab.height);
-  return new Promise(r => grab.toBlob(r, 'image/jpeg', 0.85));
+  return new Promise(r => grab.toBlob(r, 'image/jpeg', 0.92));
 }
 
 async function loop() {
   while (running) {
+    if (video.paused || video.ended) { await new Promise(r => setTimeout(r, 200)); continue; }
     lastBlob = await frameBlob();
     $('compare').disabled = false;
-    try { show(await post(`/predict?pipeline=${select.value}`, lastBlob), video); }
+    try { show(await post(`/predict?pipeline=${select.value}&source=${source}`, lastBlob), video); }
     catch (e) { $('stats').textContent = e; }
   }
 }
 
-$('live').onclick = async (e) => {
-  if (running) {
-    running = false;
-    video.srcObject.getTracks().forEach(t => t.stop());
-    e.target.textContent = 'Start live';
-    return;
-  }
+function stop() {
+  if (running) fetch(`/close?source=${source}`, { method: 'POST' }).then(refreshCars);
+  running = false;
+  if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
+  video.pause();
+  $('live').textContent = 'Camera';
+  refreshCars();
+}
+
+function start(src) {
+  source = src;
+  still.hidden = true; video.hidden = false;
+  running = true;
+  refreshCars();
+  loop();
+}
+
+$('live').onclick = async () => {
+  if (running) return stop();
+  video.removeAttribute('src');
   video.srcObject = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
   await video.play();
-  still.hidden = true; video.hidden = false;
-  running = true; e.target.textContent = 'Stop';
-  loop();
+  $('live').textContent = 'Stop';
+  start('phone');
+};
+
+$('file').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  stop();
+  video.src = URL.createObjectURL(file);
+  video.controls = true;
+  video.onended = () => { setTimeout(stop, 2000); };
+  await video.play();
+  $('live').textContent = 'Stop';
+  start('video');
 };
 
 $('photo').onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  stop();
   lastBlob = file;
   $('compare').disabled = false;
   still.src = URL.createObjectURL(file);
