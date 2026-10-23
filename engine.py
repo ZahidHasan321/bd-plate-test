@@ -66,7 +66,7 @@ def assemble(boxes: np.ndarray, tokens: list[str], scores: np.ndarray) -> dict:
     When the reader returns extras, the most confident ones are kept.
     """
     if not tokens:
-        return {"text": "", "bangla": "", "valid": False, "area": "", "letter": "", "digits": ""}
+        return format_plate([], [], "")
     tokens = [ALIASES.get(t, t) for t in tokens]
     cy = (boxes[:, 1] + boxes[:, 3]) / 2
     order = np.argsort(cy)
@@ -88,13 +88,18 @@ def assemble(boxes: np.ndarray, tokens: list[str], scores: np.ndarray) -> dict:
     metro = ["Metro"] if "Metro" in tokens else []
     area = district + metro
     letter = [tokens[i] for i in best([i for i in reading if tokens[i] in LETTERS], 1)]
+    return format_plate(area, letter, digits)
 
+
+def format_plate(area: list[str], letter: list[str], digits: str) -> dict:
+    """Plate parts (reader tokens) -> Latin text, Bangla text, BD-format check, and the parts for voting."""
     num = f"{digits[:2]}-{digits[2:]}" if len(digits) == 6 else digits
     text = f"{' '.join(area).upper()}-{''.join(letter).upper()} {num}".strip(" -")
     bangla = f"{' '.join(AREAS[a] for a in area)}-{''.join(LETTERS[l] for l in letter)} {num.translate(BN_DIGITS)}"
-    valid = bool(district and letter and len(digits) == 6)
+    valid = bool([a for a in area if a != "Metro"] and len(letter) == 1 and len(digits) == 6)
     return {"text": text, "bangla": bangla.strip(" -"), "valid": valid,
-            "area": " ".join(area).upper(), "letter": "".join(letter).upper(), "digits": digits}
+            "area": " ".join(area).upper(), "letter": "".join(letter).upper(), "digits": digits,
+            "parts": {"area": area, "letter": letter}}
 
 
 # ---------------------------------------------------------------- YOLO on ONNX
@@ -202,7 +207,9 @@ class Pipeline:
         out["chars"] = len(scores)
         return out
 
-    def run(self, img) -> dict:
+    def run(self, img, should_read=None) -> dict:
+        """Detect plates, then read them. `should_read(box, crop) -> bool` lets a caller (the vehicle tracker)
+        read only the crops it needs; skipped plates come back with `read: False` and no text."""
         t0 = time.perf_counter()
         dets = self.detect(img)
         t1 = time.perf_counter()
@@ -213,8 +220,12 @@ class Pipeline:
             crop = img[y1:y2, x1:x2]
             if not crop.size:
                 continue
-            plates.append({"box": [x1, y1, x2, y2], "det_conf": round(det_conf, 3),
-                           **self.read(crop), "crop": crop})
+            box = [x1, y1, x2, y2]
+            if should_read is None or should_read(box, crop):
+                reading = {**self.read(crop), "read": True}
+            else:
+                reading = {"text": "", "bangla": "", "valid": False, "conf": None, "read": False}
+            plates.append({"box": box, "det_conf": round(det_conf, 3), **reading, "crop": crop})
         t2 = time.perf_counter()
         return {"pipeline": self.name, "plates": plates,
                 "ms": {"detect": round((t1 - t0) * 1000, 1), "read": round((t2 - t1) * 1000, 1)}}

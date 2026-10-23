@@ -12,3 +12,4 @@ events.jsonl
 events.db
 events.db-wal
 events.db-shm
+uploads/

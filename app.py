@@ -7,14 +7,16 @@ in events.db, shown in the page's Vehicles list (/vehicles) with confirm / corre
 
 import base64
 import csv
+import shutil
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -88,10 +90,13 @@ def predict(image: UploadFile, pipeline: str, source: str | None = None):
         raise HTTPException(404, f"unknown pipeline {pipeline}")
     img = decode(image)
     h, w = img.shape[:2]
-    result = pipelines[pipeline].run(img)
+    tracker = None
     if source in ("phone", "video"):
         with db_lock:
             tracker = trackers.setdefault(source, PlateTracker(source, db=db, log=lambda line: None))
+    result = pipelines[pipeline].run(img, should_read=tracker.wants_read if tracker else None)
+    if tracker:
+        with db_lock:
             tracker.update(time.time(), img.shape, result["plates"])
     return {"width": w, "height": h, **record(result)}
 
@@ -119,6 +124,83 @@ def review(event_id: str, plate: str = Form("")):
         db.execute("UPDATE events SET reviewed=1, reviewed_plate=?, version=version+1 WHERE id=?",
                    (plate.strip() or row["plate"], event_id))
         db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- uploaded videos, analysed on this machine
+UPLOADS = ROOT / "uploads"
+jobs: dict[str, dict] = {}
+
+
+def analyse(job: dict, path: Path, pipeline, fps: float = 10.0):
+    """Read the uploaded video here (no per-frame upload): ~`fps` frames per second of video, plates found on
+    every one, read selectively; results are kept per frame time so the page can draw them in sync."""
+    cap = cv2.VideoCapture(str(path))
+    video_fps = cap.get(cv2.CAP_PROP_FPS) or 25
+    job["duration"] = (cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0) / video_fps
+    step, n, start = max(1, round(video_fps / fps)), 0, time.time()
+    with db_lock:
+        tracker = trackers["video"] = PlateTracker("video", db=db, log=lambda line: None)
+    try:
+        while not job["cancel"]:
+            ok = cap.grab()
+            if not ok:
+                break
+            n += 1
+            if n % step:
+                continue
+            ok, frame = cap.retrieve()
+            if not ok:
+                break
+            t = n / video_fps
+            res = pipeline.run(frame, should_read=tracker.wants_read)
+            with db_lock:
+                tracker.update(start + t, frame.shape, res["plates"])
+                boxes = [{"box": p["box"], **tracker.label(p["box"])} for p in res["plates"]]
+            job["frames"].append({"t": round(t, 3), "w": frame.shape[1], "h": frame.shape[0], "plates": boxes})
+            job["processed"] = t
+        with db_lock:
+            tracker.close_all()
+    except Exception as e:  # report instead of dying silently
+        job["error"] = str(e)
+    finally:
+        cap.release()
+        job["done"] = True
+        path.unlink(missing_ok=True)
+
+
+@app.post("/video")
+def upload_video(file: UploadFile = File(...), pipeline: str = "avro-s-cctv"):
+    if pipeline not in pipelines:
+        raise HTTPException(404, f"unknown pipeline {pipeline}")
+    for j in jobs.values():
+        j["cancel"] = True  # one video at a time
+    UPLOADS.mkdir(exist_ok=True)
+    job_id = uuid.uuid4().hex[:12]
+    path = UPLOADS / f"{job_id}{Path(file.filename or 'v.mp4').suffix or '.mp4'}"
+    with path.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+    if not cv2.VideoCapture(str(path)).isOpened():
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, "could not open this video (try MP4/H.264)")
+    job = jobs[job_id] = {"frames": [], "processed": 0.0, "duration": 0.0, "done": False, "cancel": False, "error": None}
+    threading.Thread(target=analyse, args=(job, path, pipelines[pipeline]), daemon=True).start()
+    return {"job": job_id}
+
+
+@app.get("/video/{job_id}")
+def video_status(job_id: str, since: int = 0):
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "unknown job")
+    return {"frames": job["frames"][since:], "next": len(job["frames"]), "processed": job["processed"],
+            "duration": job["duration"], "done": job["done"], "error": job["error"]}
+
+
+@app.delete("/video/{job_id}")
+def cancel_video(job_id: str):
+    if job_id in jobs:
+        jobs[job_id]["cancel"] = True
     return {"ok": True}
 
 

@@ -19,6 +19,8 @@ from pathlib import Path
 
 import cv2
 
+from engine import format_plate
+
 ROOT = Path(__file__).parent
 DB = ROOT / "events.db"
 
@@ -32,6 +34,9 @@ class Settings:
     min_plate_px: int = 40     # narrower plate crops are low quality
     min_sharpness: float = 20  # Laplacian variance below this = blurry
     review_after: int = 3      # unreadable after N readings -> needs_review
+    min_reads: int = 3         # always read the first N sightings of a plate
+    reread_every: int = 6      # then read again every N sightings, or when a clearly better crop appears
+    agree: float = 0.6         # per-character vote: each position's winner needs this share of the weight
     ignore: tuple = ()         # regions (x1, y1, x2, y2 as 0-1 fractions) to ignore, e.g. timestamp overlay
 
 
@@ -54,7 +59,9 @@ class Track:
     box: list
     first: float
     last: float
-    readings: list = field(default_factory=list)  # dicts: text, bangla, digits, valid, conf, good
+    readings: list = field(default_factory=list)  # dicts: text, bangla, digits, parts, valid, conf, good
+    best_read_q: float = 0.0   # quality of the best crop read so far
+    since_read: int = 0        # sightings since the last read
     best_crop: object = None
     best_score: float = -1.0
     event_id: str | None = None
@@ -75,20 +82,47 @@ def near(a, b):
     return len(a) == len(b) == 6 and sum(x != y for x, y in zip(a, b)) <= 1
 
 
+def quality(crop) -> float:
+    """Plate width in pixels, discounted when blurry: bigger and sharper crops read better."""
+    sharp = cv2.Laplacian(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
+    return crop.shape[1] * min(1.0, sharp / 100)
+
+
 def vote(track, s: Settings) -> dict:
+    """Per-character vote: each of the 6 digit positions, the district and the class letter are voted
+    separately (confidence-weighted), so readings that are each wrong in a different place still combine
+    into the right plate. Large/sharp crops are used first."""
     readings = [r for r in track.readings if r["good"]] or track.readings
-    seen = Counter(r["text"] for r in readings if r["valid"])
-    trusted = [r for r in readings if r["valid"] and (seen[r["text"]] >= 2 or (r["conf"] or 0) >= s.single_conf)]
-    pool = trusted or [r for r in readings if r["text"]]
-    if not pool:
-        return {"text": "", "confident": False, "readings": len(track.readings)}
-    weight = Counter()
-    for r in pool:
-        weight[r["text"]] += r["conf"] or 0.01
-    text = weight.most_common(1)[0][0]
-    best = next(r for r in pool if r["text"] == text)
-    return {"text": text, "bangla": best["bangla"], "digits": best["digits"], "valid": bool(trusted),
-            "confident": bool(trusted), "votes": sum(r["text"] == text for r in pool), "readings": len(track.readings)}
+    full = [r for r in readings if len(r["digits"]) == 6]
+    if not full:
+        texts = [r for r in readings if r["text"]]
+        if not texts:
+            return {"text": "", "confident": False, "readings": len(track.readings)}
+        best = max(texts, key=lambda r: r["conf"] or 0)
+        return {"text": best["text"], "bangla": best["bangla"], "digits": best["digits"], "valid": False,
+                "confident": False, "votes": 1, "readings": len(track.readings)}
+    weight = lambda r: r["conf"] or 0.01
+    digits, agreement = "", 1.0
+    for i in range(6):
+        w = Counter()
+        for r in full:
+            w[r["digits"][i]] += weight(r)
+        ch, top = w.most_common(1)[0]
+        digits += ch
+        agreement = min(agreement, top / sum(w.values()))
+    def pick(key):
+        w = Counter()
+        for r in readings:
+            if r["parts"][key]:
+                w[tuple(r["parts"][key])] += weight(r)
+        return list(w.most_common(1)[0][0]) if w else []
+    plate = format_plate(pick("area"), pick("letter"), digits)
+    single = len(full) == 1 and (full[0]["conf"] or 0) >= s.single_conf
+    # If most readings could not even find 6 digits, the few that did are not trustworthy on their own.
+    mostly_complete = len(full) >= 0.5 * len(readings)
+    confident = plate["valid"] and mostly_complete and ((len(full) >= 2 and agreement >= s.agree) or single)
+    return {"text": plate["text"], "bangla": plate["bangla"], "digits": digits, "valid": plate["valid"],
+            "confident": confident, "votes": sum(r["digits"] == digits for r in full), "readings": len(track.readings)}
 
 
 def readable_digits(track):
@@ -104,6 +138,26 @@ class PlateTracker:
         self.next_id = 1
         (ROOT / "events" / camera).mkdir(parents=True, exist_ok=True)
 
+    def match(self, box):
+        t = max(self.tracks, key=lambda t: iou(t.box, box), default=None)
+        return t if t is not None and iou(t.box, box) >= 0.2 else None
+
+    def label(self, box) -> dict:
+        """Current best reading of the vehicle at `box` (for drawing on the video)."""
+        t = self.match(box)
+        if t is None or not t.readings:
+            return {"text": "", "valid": False}
+        v = vote(t, self.s)
+        return {"text": v["text"], "valid": v.get("confident", False)}
+
+    def wants_read(self, box, crop) -> bool:
+        """Read only what helps: new plates, the first few sightings, clearly better crops, and a periodic
+        refresh. Finding plates is ~4x cheaper than reading them, so this lets us look at many more frames."""
+        t = self.match(box)
+        if t is None or len(t.readings) < self.s.min_reads or t.since_read >= self.s.reread_every:
+            return True
+        return quality(crop) > t.best_read_q * 1.15
+
     def update(self, now: float, frame_shape, plates: list) -> None:
         """Feed one processed frame: `plates` as returned by Pipeline.run (with crops)."""
         s, (h, w) = self.s, frame_shape[:2]
@@ -118,18 +172,24 @@ class PlateTracker:
             cx, cy = (p["box"][0] + p["box"][2]) / 2 / w, (p["box"][1] + p["box"][3]) / 2 / h
             if any(x1 <= cx <= x2 and y1 <= cy <= y2 for x1, y1, x2, y2 in s.ignore):
                 continue
-            t = max(self.tracks, key=lambda t: iou(t.box, p["box"]), default=None)
-            if t is None or iou(t.box, p["box"]) < 0.2:
+            t = self.match(p["box"])
+            if t is None:
                 t = Track(self.next_id, p["box"], now, now)
                 self.tracks.append(t)
                 self.next_id += 1
             t.box, t.last = p["box"], now
             crop = p["crop"]
+            q = quality(crop)
             good = crop.shape[1] >= s.min_plate_px and \
                 cv2.Laplacian(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() >= s.min_sharpness
-            t.readings.append({"text": p["text"], "bangla": p["bangla"], "digits": p.get("digits", ""),
-                               "valid": p["valid"], "conf": p["conf"], "good": good})
-            score = (p["conf"] or 0) + p["det_conf"] + (1 if good else 0)
+            if p.get("read", True):
+                t.readings.append({"text": p["text"], "bangla": p["bangla"], "digits": p.get("digits", ""),
+                                   "parts": p.get("parts", {"area": [], "letter": []}),
+                                   "valid": p["valid"], "conf": p["conf"], "good": good})
+                t.since_read, t.best_read_q = 0, max(t.best_read_q, q)
+            else:
+                t.since_read += 1
+            score = (p["conf"] or 0) + p["det_conf"] + (1 if good else 0) + q / 1000
             if score > t.best_score:
                 t.best_score, t.best_crop = score, crop
 

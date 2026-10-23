@@ -154,7 +154,7 @@ def main():
     ap.add_argument("source")
     ap.add_argument("-p", "--pipeline", default="avro-s-cctv")
     ap.add_argument("--camera", default="cam1")
-    ap.add_argument("--fps", type=float, default=5, help="frames processed per second")
+    ap.add_argument("--fps", type=float, default=10, help="frames processed per second")
     ap.add_argument("--post", help="URL to POST events to (retried until accepted)")
     ap.add_argument("--gone", type=float, default=1.5, help="seconds unseen before a vehicle's track closes")
     ap.add_argument("--early", type=float, default=2.0, help="report a confident read after this many seconds")
@@ -183,7 +183,7 @@ def main():
     for now, frame in src.frames():
         processed += 1
         t0 = time.perf_counter()
-        res = pipe.run(frame)
+        res = pipe.run(frame, should_read=tracker.wants_read)
         busy += time.perf_counter() - t0
         tracker.update(now, frame.shape, res["plates"])
         if time.time() - last_beat > 10:

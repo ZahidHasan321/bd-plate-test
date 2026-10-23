@@ -30,7 +30,9 @@ Claude Code reads `CLAUDE.md` and runs the steps below for you.
    the line under it shows each model's test numbers), then:
    - **Sample photo…** — built-in night/day photos (see `samples/README.md`).
    - **Camera** — phone (or laptop) camera, live.
-   - **Video** — play a video file from this device (e.g. CCTV footage on a laptop); it is processed as it plays.
+   - **Video** — pick a clip on this device (laptop or phone gallery). It is uploaded once and analysed on the
+     computer (~10 frames per second of video); playback pauses briefly whenever it gets ahead of the analysis,
+     so no part is skipped. **1× / 0.5× / 0.25×** changes the playback speed.
    - **Photos** — one or several pictures (on a phone: camera or gallery); several give a results table.
      **Compare all** runs the last frame through every pipeline.
 

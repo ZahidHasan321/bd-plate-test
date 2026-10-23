@@ -56,6 +56,9 @@
   <button id="live">Camera</button>
   <label class="btn">Video<input id="file" type="file" accept="video/*" hidden></label>
   <label class="btn">Photos<input id="photo" type="file" accept="image/*" multiple hidden></label>
+  <select id="speed" aria-label="Playback speed" title="Video playback speed">
+    <option value="1">1×</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option>
+  </select>
   <button id="compare" disabled>Compare all</button>
 </header>
 <div id="note"></div>
@@ -107,19 +110,23 @@ async function post(url, blob) {
 const plateText = (p) =>
   `<span class="${p.valid ? 'ok' : 'bad'}">${esc(p.text) || '?'}</span>` + (p.bangla ? ` <span class="bn">${esc(p.bangla)}</span>` : '');
 
-function show(data, el) {
+function drawBoxes(plates, width, height, el) {
   const r = el.getBoundingClientRect();
   overlay.width = r.width; overlay.height = r.height;
-  const sx = r.width / data.width, sy = r.height / data.height;
+  const sx = r.width / width, sy = r.height / height;
   const ctx = overlay.getContext('2d');
   ctx.clearRect(0, 0, overlay.width, overlay.height);
   ctx.lineWidth = 3; ctx.font = 'bold 16px monospace';
-  for (const p of data.plates) {
+  for (const p of plates) {
     const [x1, y1, x2, y2] = p.box;
     ctx.strokeStyle = ctx.fillStyle = p.valid ? '#3f3' : '#f93';
     ctx.strokeRect(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy);
-    ctx.fillText(p.text || '?', x1 * sx, Math.max(16, y1 * sy - 6));
+    ctx.fillText(p.text || '…', x1 * sx, Math.max(16, y1 * sy - 6));
   }
+}
+
+function show(data, el) {
+  drawBoxes(data.plates, data.width, data.height, el);
   $('stats').textContent = `${data.pipeline} · ${data.width}x${data.height} · detect ${data.ms.detect} ms · read ${data.ms.read} ms · round trip ${data.roundtrip} ms`;
   $('plates').innerHTML = data.plates.map(p =>
     `<div class="plate">${p.crop_jpg ? `<img src="data:image/jpeg;base64,${p.crop_jpg}" alt="plate crop">` : ''}
@@ -200,6 +207,7 @@ async function loop() {
 }
 
 function stop() {
+  endJob();
   if (running) fetch(`/close?source=${source}`, { method: 'POST' }).then(refreshCars);
   running = false;
   run++;
@@ -218,7 +226,7 @@ function start(src) {
 }
 
 $('live').onclick = async () => {
-  if (running) return stop();
+  if (running || job) return stop();
   video.removeAttribute('src');
   video.srcObject = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
@@ -248,16 +256,84 @@ $('sample').onchange = async (e) => {
   runPhoto(blob, URL.createObjectURL(blob));
 };
 
+// ---------------------------------------------------------------- uploaded video: analysed on the server
+// The file is uploaded once; the server reads every frame itself. The page plays the clip and draws the
+// server's results for the current moment, pausing briefly whenever playback gets ahead of the analysis.
+let job = null;
+
+function upload(file) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/video?pipeline=${select.value}`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) $('stats').textContent = `Uploading ${Math.round(100 * e.loaded / e.total)}%…`; };
+    xhr.onload = () => xhr.status === 200 ? resolve(JSON.parse(xhr.responseText).job) : reject(new Error(xhr.responseText));
+    xhr.onerror = () => reject(new Error('upload failed'));
+    xhr.send(form);
+  });
+}
+
+function endJob() {
+  if (!job) return;
+  job.active = false;
+  if (!job.done) fetch(`/video/${job.id}`, { method: 'DELETE' });
+  job = null;
+}
+
+async function pollJob(j) {
+  while (j.active) {
+    try {
+      const d = await (await fetch(`/video/${j.id}?since=${j.frames.length}`)).json();
+      j.frames.push(...d.frames);
+      Object.assign(j, { processed: d.processed, duration: d.duration, done: d.done, error: d.error });
+      refreshCars();
+      if (d.done) { if (d.error) $('stats').textContent = `Analysis error: ${d.error}`; break; }
+    } catch {}
+    await new Promise(r => setTimeout(r, 700));
+  }
+  refreshCars();
+}
+
+function drawJob(j) {
+  if (!j.active) return;
+  const now = video.currentTime;
+  // Results for the latest analysed frame at or just before the current moment.
+  let f = null;
+  for (let i = j.frames.length - 1; i >= 0; i--) if (j.frames[i].t <= now + 0.05) { f = j.frames[i]; break; }
+  if (f && now - f.t < 0.4) drawBoxes(f.plates, f.w, f.h, video);
+  else overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+  // Keep playback behind the analysis so no part of the clip is skipped.
+  const behind = !j.done && now > j.processed + 0.1;
+  if (behind && !video.paused) { j.waiting = true; video.pause(); }
+  if (j.waiting && (j.done || j.processed > now + 1.0)) { j.waiting = false; video.play(); }
+  $('stats').textContent = j.done ? `Analysis complete · ${j.frames.length} frames analysed`
+    : `${j.waiting ? 'Waiting for analysis' : 'Analysing'} · ${j.processed.toFixed(1)} / ${j.duration.toFixed(1)} s analysed`;
+  requestAnimationFrame(() => drawJob(j));
+}
+
+$('speed').onchange = () => { video.playbackRate = Number($('speed').value); };
+
 $('file').onchange = async (e) => {
   const file = e.target.files[0];
+  e.target.value = '';
   if (!file) return;
   stop();
+  $('batch').hidden = true; $('plates').innerHTML = '';
+  source = 'video';
+  let id;
+  try { id = await upload(file); }
+  catch (err) { $('stats').textContent = String(err.message || err); return; }
+  job = { id, frames: [], processed: 0, duration: 0, done: false, active: true, waiting: false };
+  still.hidden = true; video.hidden = false;
   video.src = URL.createObjectURL(file);
   video.controls = true;
-  video.onended = () => { setTimeout(stop, 2000); };
-  await video.play();
+  video.playbackRate = Number($('speed').value);
+  video.onended = null;
   $('live').textContent = 'Stop';
-  start('video');
+  pollJob(job);
+  try { await video.play(); } catch {}
+  drawJob(job);
 };
 
 // One or more photos (phone: camera or gallery). Several photos are read one by one into a results table.
