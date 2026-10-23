@@ -1,7 +1,7 @@
 """Read a camera / video, track plates across frames, vote, and emit one event per vehicle.
 
 Usage:
-  uv run python stream.py <source> [-p avro-s] [--fps 5] [--camera gate-1] [--post URL]
+  uv run python stream.py <source> [-p avro-s-cctv] [--fps 5] [--camera gate-1] [--post URL]
     source: rtsp://user:pass@ip/stream | video.mp4 | 0 (webcam)
 
 Each event is printed as a JSON line, appended to events.jsonl, its best plate crop saved under
@@ -89,7 +89,7 @@ def emit(track: Track, args) -> None:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("source")
-    ap.add_argument("-p", "--pipeline", default="avro-s")
+    ap.add_argument("-p", "--pipeline", default="avro-s-cctv")
     ap.add_argument("--fps", type=float, default=5, help="frames processed per second")
     ap.add_argument("--camera", default="cam1")
     ap.add_argument("--post", help="URL to POST each event to")
