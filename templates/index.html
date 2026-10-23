@@ -22,6 +22,7 @@
   #stats { padding: 6px 16px; font-size: 13px; color: #aaa; }
   #plates { padding: 0 16px 16px; }
   .plate { font-size: 20px; font-family: monospace; margin: 8px 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  #batch img { height: 40px; max-width: 140px; object-fit: contain; background: #000; border-radius: 3px; }
   .plate img { height: 64px; max-width: 220px; object-fit: contain; background: #000; border-radius: 4px; }
   .bn { font-family: system-ui, sans-serif; }
   .plate small { font-size: 13px; color: #aaa; }
@@ -49,17 +50,16 @@
     </optgroup>{% endfor %}
   </select>
   <select id="sample" aria-label="Sample">
-    <option value="">Try a sample…</option>
-    <optgroup label="Videos">{% for f in samples.videos %}<option value="videos/{{ f }}">▶ {{ f.rsplit('.', 1)[0].replace('_', ' ') }}</option>{% endfor %}</optgroup>
-    <optgroup label="Photos">{% for f in samples.photos %}<option value="photos/{{ f }}">{{ f.rsplit('.', 1)[0].replace('_', ' ') }}</option>{% endfor %}</optgroup>
+    <option value="">Sample photo…</option>
+    {% for f in samples %}<option value="{{ f }}">{{ f.rsplit('.', 1)[0].replace('_', ' ') }}</option>{% endfor %}
   </select>
   <button id="live">Camera</button>
   <label class="btn">Video<input id="file" type="file" accept="video/*" hidden></label>
-  <label class="btn">Photo<input id="photo" type="file" accept="image/*" capture="environment" hidden></label>
+  <label class="btn">Photos<input id="photo" type="file" accept="image/*" multiple hidden></label>
   <button id="compare" disabled>Compare all</button>
 </header>
 <div id="note"></div>
-<div id="credit">Samples: NightLPBD (Hasan &amp; Ahsan, CC BY 4.0) and Bangladesh Vehicle Number Plate Detection Dataset (CC BY 4.0); videos are built from these photos.</div>
+<div id="credit">Samples: NightLPBD (Hasan &amp; Ahsan, CC BY 4.0) and Bangladesh Vehicle Number Plate Detection Dataset (CC BY 4.0).</div>
 <main>
   <section>
     <div id="stage">
@@ -68,6 +68,7 @@
     </div>
     <div id="stats"></div>
     <div id="plates"></div>
+    <div class="wrap"><table id="batch" hidden></table></div>
     <div class="wrap"><table id="table" hidden></table></div>
   </section>
   <aside>
@@ -226,16 +227,6 @@ $('live').onclick = async () => {
   start('phone');
 };
 
-async function playVideo(url) {
-  stop();
-  video.src = url;
-  video.controls = true;
-  video.onended = () => { setTimeout(stop, 2000); };
-  await video.play();
-  $('live').textContent = 'Stop';
-  start('video');
-}
-
 async function runPhoto(blob, url) {
   stop();
   lastBlob = blob;
@@ -243,15 +234,17 @@ async function runPhoto(blob, url) {
   still.src = url;
   await still.decode();
   video.hidden = true; still.hidden = false;
-  show(await post(`/predict?pipeline=${select.value}`, blob), still);
+  const data = await post(`/predict?pipeline=${select.value}`, blob);
+  show(data, still);
+  return data;
 }
 
 $('sample').onchange = async (e) => {
-  const path = e.target.value;
+  const name = e.target.value;
   e.target.value = '';
-  if (!path) return;
-  if (path.startsWith('videos/')) return playVideo(`/samples/${path}`);
-  const blob = await (await fetch(`/samples/${path}`)).blob();
+  if (!name) return;
+  $('batch').hidden = true;
+  const blob = await (await fetch(`/samples/photos/${name}`)).blob();
   runPhoto(blob, URL.createObjectURL(blob));
 };
 
@@ -267,16 +260,24 @@ $('file').onchange = async (e) => {
   start('video');
 };
 
+// One or more photos (phone: camera or gallery). Several photos are read one by one into a results table.
 $('photo').onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  stop();
-  lastBlob = file;
-  $('compare').disabled = false;
-  still.src = URL.createObjectURL(file);
-  await still.decode();
-  video.hidden = true; still.hidden = false;
-  show(await post(`/predict?pipeline=${select.value}`, file), still);
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  const table = $('batch');
+  table.hidden = files.length < 2;
+  table.innerHTML = '<tr><th>photo</th><th>plate</th><th>reading</th></tr>';
+  for (const file of files) {
+    let data;
+    try { data = await runPhoto(file, URL.createObjectURL(file)); }
+    catch (err) { $('stats').textContent = `${file.name}: ${err}`; continue; }
+    if (files.length < 2) break;
+    const plates = data.plates.length ? data.plates : [{}];
+    table.insertAdjacentHTML('beforeend', plates.map(p => `<tr><td>${esc(file.name)}</td>
+      <td>${p.crop_jpg ? `<img src="data:image/jpeg;base64,${p.crop_jpg}" alt="plate">` : '-'}</td>
+      <td>${p.box ? plateText(p) : 'no plate found'}</td></tr>`).join(''));
+  }
 };
 
 $('compare').onclick = async (e) => {

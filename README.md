@@ -28,10 +28,11 @@ Claude Code reads `CLAUDE.md` and runs the steps below for you.
 
 4. Pick a model (the dropdown groups them: **★ Recommended** `avro-s-cctv`, Faster, Other, Reference, Baseline —
    the line under it shows each model's test numbers), then:
-   - **Try a sample…** — built-in night/day photos and two short videos (see `samples/README.md`).
+   - **Sample photo…** — built-in night/day photos (see `samples/README.md`).
    - **Camera** — phone (or laptop) camera, live.
    - **Video** — play a video file from this device (e.g. CCTV footage on a laptop); it is processed as it plays.
-   - **Photo** — a single picture. **Compare all** runs the last frame through every pipeline.
+   - **Photos** — one or several pictures (on a phone: camera or gallery); several give a results table.
+     **Compare all** runs the last frame through every pipeline.
 
    The **Vehicles** list shows **one row per vehicle**: plate crop, English + Bangla text, and a badge —
    *read*, *needs review* (seen clearly but not readable), or *confirmed*. A car that waits, is hidden for a

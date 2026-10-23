@@ -16,7 +16,7 @@ Phone-camera test bench for Bangladeshi licence-plate recognition. Python, FastA
      *Advanced → Proceed* on the certificate warning once. If the phone can't connect, check the computer's
      firewall allows port 8000.
 4. Tell the user: choose a pipeline in the dropdown (`avro-s-cctv` is the best cheap one; `avro-s-cctv-fast` is faster),
-   then **Try a sample…** (built-in photos/videos), **Camera** (live), **Video** (a video file from that device) or **Photo**. The **Vehicles** list shows one
+   then **Sample photo…** (built-in), **Camera** (live), **Video** (a clip from that device) or **Photos** (one or several, from camera or gallery). The **Vehicles** list shows one
    row per vehicle with ✓ Correct / ✎ Fix; **Compare all** compares every pipeline on the last frame.
 
 ## Layout

@@ -78,8 +78,7 @@ GROUPS = [("recommended", "★ Recommended"), ("fast", "Faster"), ("alternative"
 @app.get("/")
 def index(request: Request):
     groups = [(label, [p for p in pipelines.values() if p.tag == tag]) for tag, label in GROUPS]
-    samples = {kind: sorted(f.name for f in (ROOT / "samples" / kind).iterdir() if not f.name.startswith("."))
-               for kind in ("photos", "videos")}
+    samples = sorted(f.name for f in (ROOT / "samples" / "photos").iterdir() if not f.name.startswith("."))
     return templates.TemplateResponse(request, "index.html", {"groups": groups, "samples": samples})
 
 
