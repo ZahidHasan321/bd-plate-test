@@ -1,0 +1,16 @@
+{
+  "id": "zahidhasan530/bd-plate-reader-robust",
+  "title": "BD plate reader robust",
+  "code_file": "train_reader_robust.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "thasan3003/nightlpbd-nighttime-license-plates-of-bangladesh",
+    "arstrxshad/banglabengali-license-plate-with-number-detection"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

@@ -16,7 +16,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 # Input sizes per model (default 640). Extra sizes get a _<size> suffix; plate crops are small, so a
 # 320 reader is ~4x cheaper. night/read_320 was trained at 320.
-SIZES = {"avro/read_s": [640, 320], "night/read_320": [320]}
+SIZES = {"avro/read_s": [640, 320], "night/read_320": [320], "robust/read_320": [320]}
 
 for pt in sorted(RAW.glob("*/*.pt")):
     sizes = SIZES.get(f"{pt.parent.name}/{pt.stem}", [640])

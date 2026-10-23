@@ -4,21 +4,21 @@
 #   reader.type:   yolo (ONNX character detector, Bangla tokens) | fpo (fast-plate-ocr hub model, Latin only)
 # Optional: conf (default detector 0.25, reader 0.25).
 #   vehicles: {path, conf, classes} -> run the plate detector inside each vehicle crop (cascade).
-# Numbers in notes: "CCTV" = plates found on 83 held-out night toll-booth CCTV frames;
+# Numbers in notes: "CCTV" = plates found (and read in valid format) on 83 held-out night toll-booth CCTV frames;
 #                   "night test" = whole plate read correctly on 189 NightLPBD test images.
 
 pipelines:
   avro-s-cctv:
     tag: recommended
-    note: "Best overall. CCTV: finds 99% of plates · night test: 72% fully correct · edge-friendly (YOLOv8n + YOLOv8s)."
+    note: "Best overall. CCTV: finds 99% of plates, 75% read in valid format · night test: 76% fully correct · edge-friendly (YOLOv8n + YOLOv8s)."
     detector: {type: yolo, path: weights/onnx/cctv_detect.onnx}
-    reader: {type: yolo, path: weights/onnx/night_read.onnx}
+    reader: {type: yolo, path: weights/onnx/robust_read.onnx}
 
   avro-s-cctv-fast:
     tag: fast
-    note: "Same plate finder, reader at 320px: ~2x faster reading. CCTV: 99% found · night test: 72% fully correct."
+    note: "Same plate finder, reader at 320px: ~2x faster reading. CCTV: 99% found, 75% valid format · night test: 70% fully correct."
     detector: {type: yolo, path: weights/onnx/cctv_detect.onnx}
-    reader: {type: yolo, path: weights/onnx/night_read_320.onnx}
+    reader: {type: yolo, path: weights/onnx/robust_read_320.onnx}
 
   avro-s-night:
     tag: alternative

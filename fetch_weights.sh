@@ -26,6 +26,11 @@ for f in detect read read_320; do
   [ -f weights/raw/night/$f.pt ] || { mkdir -p weights/raw/night; echo "downloading night/$f.pt";
     curl -fsSL -o weights/raw/night/$f.pt "$REL/night_$f.pt"; }
 done
+# Readers further trained with blurred / compressed copies (robust to phone and CCTV video).
+for f in read read_320; do
+  [ -f weights/raw/robust/$f.pt ] || { mkdir -p weights/raw/robust; echo "downloading robust/$f.pt";
+    curl -fsSL -o weights/raw/robust/$f.pt "https://github.com/ZahidHasan321/bd-plate-test/releases/download/robust-v1/robust_$f.pt"; }
+done
 # Plate detector further trained on night toll-booth CCTV.
 [ -f weights/raw/cctv/detect.pt ] || { mkdir -p weights/raw/cctv; echo "downloading cctv/detect.pt";
   curl -fsSL -o weights/raw/cctv/detect.pt https://github.com/ZahidHasan321/bd-plate-test/releases/download/cctv-v1/cctv_detect.pt; }
